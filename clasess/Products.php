@@ -348,15 +348,21 @@ class JPIODFW_Products
     /**funcion que va amostrar en la lista de productos si ya etsa sincronizado con dropi */
     function show_custom_product_column_values($column, $post_id)
     {
-        if ('is_dropi_product' == $column) {
+        $dropi_product = null;
 
-            $dropi_product = get_post_meta($post_id, '_dropi_product', true);
+        if (in_array($column, array('is_dropi_product', 'dropi_supplier_price'), true)) {
+            $dropi_product_raw = get_post_meta($post_id, '_dropi_product', true);
 
-            $unserialized = unserialize($dropi_product);
-            if (empty($unserialized) || $unserialized == false) {
-                $unserialized = json_decode($dropi_product);
+            if (!empty($dropi_product_raw)) {
+                $dropi_product = @unserialize($dropi_product_raw);
+
+                if (empty($dropi_product) || $dropi_product == false) {
+                    $dropi_product = json_decode($dropi_product_raw);
+                }
             }
+        }
 
+        if ('is_dropi_product' == $column) {
             if (!empty($dropi_product)) {
 
                 echo "<span class='dashicons dashicons-yes' style='color:#2bee2b'></span>" . __('Sincronizado', 'wc-dropi-integration');
@@ -373,6 +379,21 @@ class JPIODFW_Products
             $dropi_store = get_post_meta($post_id, '_dropi_token_store', true);
             echo $dropi_store;
         }
+
+        if ('dropi_supplier_price' == $column) {
+            $supplier_price = get_post_meta($post_id, '_dropi_supplier_price', true);
+
+            if (($supplier_price === '' || $supplier_price === null) && is_object($dropi_product) && isset($dropi_product->sale_price)) {
+                $supplier_price = $dropi_product->sale_price;
+            }
+
+            if ($supplier_price === '' || $supplier_price === null) {
+                echo '&mdash;';
+                return;
+            }
+
+            echo wc_price((float) $supplier_price);
+        }
     }
 
     /**funcion que agrega la columna extra a la lista de productos */
@@ -384,6 +405,9 @@ class JPIODFW_Products
         // Inserting columns to a specific location
         foreach ($columns as $key => $column) {
             $reordered_columns[$key] = $column;
+            if ($key == 'price') {
+                $reordered_columns['dropi_supplier_price'] = __('Precio Proveedor', 'wc-dropi-integration');
+            }
             if ($key == 'featured') {
                 // Inserting after "Status" column
                 $reordered_columns['is_dropi_product'] = __('Dropi Product', 'wc-dropi-integration');
