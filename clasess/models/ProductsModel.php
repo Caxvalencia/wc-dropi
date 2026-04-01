@@ -435,17 +435,32 @@ class JPIODFW_ProductsModel
                             $attributes2 = [];
                             foreach ($variation->attribute_values as $attr) {
                                 $attr = (object)$attr;
+                                $attribute_name = '';
+
+                                if (isset($attr->attribute_name) && $attr->attribute_name !== '') {
+                                    $attribute_name = $attr->attribute_name;
+                                } elseif (isset($attr->attribute) && is_object($attr->attribute) && isset($attr->attribute->description)) {
+                                    $attribute_name = $attr->attribute->description;
+                                }
+
+                                if ($attribute_name === '') {
+                                    continue;
+                                }
+
                                 $attribute = array(
-                                    $attr->attribute_name => $attr->value
+                                    $attribute_name => $attr->value
                                 );
                                 $attribute2 = array(
-                                    'id' => 0, 'name' =>  $attr->attribute_name, 'option' => $attr->value
+                                    'id' => 0, 'name' =>  $attribute_name, 'option' => $attr->value
                                 );
                                 $attributes[] = $attribute;
                                 $attributes2[] = $attribute2;
                             }
                             $variation_data['attributes'] = $attributes;
                             $variation_data['attributes2'] = $attributes2;
+                            if ($sob_images == 'true' || $sob_images == null) {
+                                $variation_data['image'] = $this->getVariationImageSource($product, $variation);
+                            }
 
 
                             $message = $this->create_product_variation($post_id, $variation_data, $variation, $varianExisttId);
@@ -657,6 +672,7 @@ class JPIODFW_ProductsModel
         try {
             // Get the Variable product object (parent)
             $product = wc_get_product($product_id);
+            $variation_id = false;
             //si ya viene con un variation id quiere quedcir que en el selector selecciono vincular a una variabloe
             //si viene false quiere decir que selecciono crear niueva
             if ($varianExisttId === false) {
@@ -750,18 +766,22 @@ class JPIODFW_ProductsModel
             $variation->set_regular_price($variation_data['regular_price']);
 
             // Stock
-            if (!empty($variation_data['stock_qty'])) {
-
-
-                if ($create === true) {
-                    $variation->set_manage_stock(true);
-                    $variation->set_stock_status('');
-                    $variation->set_stock_quantity($variation_data['stock_qty']);
-                } else {
-                    update_post_meta($variation_id, "_stock", $variation_data['stock_qty']);
-                }
+            if (array_key_exists('stock_qty', $variation_data) && $variation_data['stock_qty'] !== null && $variation_data['stock_qty'] !== '') {
+                $stock_quantity = max(0, intval($variation_data['stock_qty']));
+                $variation->set_manage_stock(true);
+                $variation->set_stock_quantity($stock_quantity);
+                $variation->set_stock_status($stock_quantity > 0 ? 'instock' : 'outofstock');
             } else {
                 $variation->set_manage_stock(false);
+                $variation->set_stock_quantity(null);
+            }
+
+            if (!empty($variation_data['image'])) {
+                $variation_image_id = $this->importDropiImageAttachment($variation_id, $variation_data['image']);
+                if (!empty($variation_image_id)) {
+                    $variation->set_image_id($variation_image_id);
+                    update_post_meta($variation_id, '_thumbnail_id', $variation_image_id);
+                }
             }
 
             $variation->set_weight(''); // weight (reseting)
@@ -889,10 +909,6 @@ class JPIODFW_ProductsModel
                 return;
             }
 
-            require_once(ABSPATH . 'wp-admin/includes/file.php');
-            require_once(ABSPATH . 'wp-admin/includes/media.php');
-            require_once(ABSPATH . 'wp-admin/includes/image.php');
-
             usort($gallery, function ($left, $right) {
                 $left_is_main = (is_object($left) && !empty($left->main)) ? 1 : 0;
                 $right_is_main = (is_object($right) && !empty($right->main)) ? 1 : 0;
@@ -903,43 +919,11 @@ class JPIODFW_ProductsModel
             $attachment_ids = array();
 
             foreach ($gallery as $img) {
-                $image_url = $this->getDropiImageUrl($img);
+                $attach_id = $this->importDropiImageAttachment($post_id, $img);
 
-                if (empty($image_url)) {
-                    continue;
+                if (!empty($attach_id)) {
+                    $attachment_ids[] = $attach_id;
                 }
-
-                $image_name = $this->getDropiImageFilename($img, $image_url);
-                $tmp_file = download_url($image_url, 120);
-
-                if (is_wp_error($tmp_file)) {
-                    $this->logger->error('No se pudo descargar imagen ' . $image_url, array('source' => 'dropi-products-images'));
-                    $this->logger->error($tmp_file->get_error_message(), array('source' => 'dropi-products-images'));
-                    continue;
-                }
-
-                $file_array = array(
-                    'name' => $image_name,
-                    'tmp_name' => $tmp_file,
-                );
-
-                $attach_id = media_handle_sideload(
-                    $file_array,
-                    $post_id,
-                    null,
-                    array(
-                        'post_parent' => $post_id,
-                    )
-                );
-
-                if (is_wp_error($attach_id)) {
-                    @unlink($tmp_file);
-                    $this->logger->error('No se pudo crear attachment para imagen ' . $image_url, array('source' => 'dropi-products-images'));
-                    $this->logger->error($attach_id->get_error_message(), array('source' => 'dropi-products-images'));
-                    continue;
-                }
-
-                $attachment_ids[] = $attach_id;
             }
 
             if (empty($attachment_ids)) {
@@ -953,6 +937,92 @@ class JPIODFW_ProductsModel
             $this->logger->error('error al crear imagenes', array('source' => 'dropi-products'));
             $this->logger->error(wc_print_r($e, true), array('source' => 'dropi-products'));
         }
+    }
+
+    private function getVariationImageSource($product, $variation)
+    {
+        if (!is_object($product) || !is_object($variation)) {
+            return null;
+        }
+
+        $photos = array();
+
+        if (isset($product->photos) && is_array($product->photos)) {
+            $photos = $product->photos;
+        } elseif (isset($product->gallery) && is_array($product->gallery)) {
+            $photos = $product->gallery;
+        }
+
+        if (empty($photos)) {
+            return null;
+        }
+
+        $fallback_image = null;
+
+        foreach ($photos as $photo) {
+            if (!is_object($photo)) {
+                continue;
+            }
+
+            if ($fallback_image === null) {
+                $fallback_image = $photo;
+            }
+
+            if (!empty($photo->main)) {
+                $fallback_image = $photo;
+            }
+
+            if (isset($photo->variation_id) && intval($photo->variation_id) === intval($variation->id)) {
+                return $photo;
+            }
+        }
+
+        return $fallback_image;
+    }
+
+    private function importDropiImageAttachment($post_id, $img)
+    {
+        require_once(ABSPATH . 'wp-admin/includes/file.php');
+        require_once(ABSPATH . 'wp-admin/includes/media.php');
+        require_once(ABSPATH . 'wp-admin/includes/image.php');
+
+        $image_url = $this->getDropiImageUrl($img);
+
+        if (empty($image_url)) {
+            return 0;
+        }
+
+        $image_name = $this->getDropiImageFilename($img, $image_url);
+        $tmp_file = download_url($image_url, 120);
+
+        if (is_wp_error($tmp_file)) {
+            $this->logger->error('No se pudo descargar imagen ' . $image_url, array('source' => 'dropi-products-images'));
+            $this->logger->error($tmp_file->get_error_message(), array('source' => 'dropi-products-images'));
+            return 0;
+        }
+
+        $file_array = array(
+            'name' => $image_name,
+            'tmp_name' => $tmp_file,
+        );
+
+        $attach_id = media_handle_sideload(
+            $file_array,
+            $post_id,
+            null,
+            array(
+                'post_parent' => $post_id,
+            )
+        );
+
+        if (is_wp_error($attach_id)) {
+            @unlink($tmp_file);
+            $this->logger->error('No se pudo crear attachment para imagen ' . $image_url, array('source' => 'dropi-products-images'));
+            $this->logger->error($attach_id->get_error_message(), array('source' => 'dropi-products-images'));
+            return 0;
+        }
+
+        return intval($attach_id);
     }
 
     private function getDropiImageUrl($img)
