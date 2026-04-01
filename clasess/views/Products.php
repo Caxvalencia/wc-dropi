@@ -119,6 +119,16 @@ class JPIODFW_ProductsView
                                         </select>
                                     </div>
 
+                                    <div class="col-md-12 flex items-start" id="row-clean-variations" style="display:none;">
+                                        <div class="flex items-center h-5">
+                                            <input id="clean-variations" name="clean-variations" value="1" type="checkbox" class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                                        </div>
+                                        <div class="ml-3 text-sm">
+                                            <label for="clean-variations" class="font-medium text-gray-700"><strong>Limpiar variaciones existentes</strong></label>
+                                            <p class="text-gray-500">Si se activa al vincular un producto variable, se eliminarán primero las variaciones existentes del producto WooCommerce antes de recrearlas.</p>
+                                        </div>
+                                    </div>
+
 
                                     <div class="col-md-12  mb-3" id="row-variations">
                                         <label for="products-select" class="font-medium text-gray-700"><strong>Variaciones</strong> </label>
@@ -235,6 +245,7 @@ class JPIODFW_ProductsView
                                     <div class="col-md-6">
                                         <label class="d-block"><input id="bulk-sob-images" type="checkbox" checked> Guardar imagenes</label>
                                         <label class="d-block"><input id="bulk-sob-stock" type="checkbox" checked> Guardar stock</label>
+                                        <label class="d-block"><input id="bulk-clean-variations" type="checkbox"> Limpiar variaciones existentes al sincronizar</label>
                                     </div>
                                 </div>
 

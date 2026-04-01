@@ -69,6 +69,7 @@ jQuery(document).ready(function ($) {
         console.log(this.value);
         if (this.value == 'SYNC') {
             jQuery('#row-products-select').show();
+            jQuery('#row-clean-variations').show();
             $("#sob-nombre").prop('checked', false);
             $("#sob-precio").prop('checked', false);
             $("#sob-images").prop('checked', false);
@@ -85,6 +86,8 @@ jQuery(document).ready(function ($) {
             });
         } else {
             jQuery('#row-products-select').hide();
+            jQuery('#row-clean-variations').hide();
+            jQuery('#clean-variations').prop('checked', false);
             jQuery('select[name=chose-variations]').each(function () {
                 //this wrapped in jQuery will give us the current .letter-q div
                 jQuery(this).hide();
@@ -176,6 +179,8 @@ jQuery(document).ready(function ($) {
         $("#variant-select").html('');
         $("#products-select").val('');
         jQuery('#row-products-select').hide();
+        jQuery('#row-clean-variations').hide();
+        jQuery('#clean-variations').prop('checked', false);
         jQuery("#new-product").prop("checked", true);
 
 
@@ -274,7 +279,8 @@ jQuery(document).ready(function ($) {
             sob_descripcion: $("#bulk-sob-descripcion").is(':checked'),
             sob_precio: $("#bulk-sob-precio").is(':checked'),
             sob_images: $("#bulk-sob-images").is(':checked'),
-            sob_stock: $("#bulk-sob-stock").is(':checked')
+            sob_stock: $("#bulk-sob-stock").is(':checked'),
+            clean_existing_variations: $("#bulk-clean-variations").is(':checked')
         };
 
         let successCount = 0;
@@ -383,6 +389,7 @@ function JPIODFW_proces_form() {
     let sob_precio = jQuery("#sob-precio").is(':checked');
     let sob_images = jQuery("#sob-images").is(':checked');
     let sob_stock = jQuery("#sob-stock").is(':checked');
+    let clean_existing_variations = jQuery("#clean-variations").is(':checked');
     let store =  jQuery("#store").val();
 
     let variationstoimport = jQuery.map(jQuery('input[type=checkbox][name=variations]:checked'), function (c) {
@@ -406,7 +413,7 @@ function JPIODFW_proces_form() {
     let productselect = jQuery("#products-select").val();
 
     JPIODFW_import(product_url, product_name, product_description, product_price,
-        sob_nombre, sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store);
+        sob_nombre, sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store, clean_existing_variations);
 }
 
 function JPIODFW_showAlert(title, text, incon, confirmButtonText) {
@@ -478,7 +485,8 @@ function JPIODFW_importByProductId(productId, store, options) {
                 sob_descripcion: options.sob_descripcion,
                 sob_precio: options.sob_precio,
                 sob_images: options.sob_images,
-                sob_stock: options.sob_stock
+                sob_stock: options.sob_stock,
+                clean_existing_variations: options.clean_existing_variations
             },
             success: function (response) {
                 resolve(response);
@@ -492,7 +500,7 @@ function JPIODFW_importByProductId(productId, store, options) {
 
 
 function JPIODFW_import(product_url, product_name, product_description, product_price, sob_nombre,
-    sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store) {
+    sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store, clean_existing_variations) {
 
     let data = {};
     if (product_name != undefined) {
@@ -510,6 +518,7 @@ function JPIODFW_import(product_url, product_name, product_description, product_
         data.variations = variations;
         data.attributes = attributes;
         data.store = store;
+        data.clean_existing_variations = clean_existing_variations;
 
     }
 

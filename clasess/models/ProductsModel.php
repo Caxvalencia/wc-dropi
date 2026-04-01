@@ -313,7 +313,8 @@ class JPIODFW_ProductsModel
         $attributes = null,
         $sob_stock = null,
         $store = null,
-        $dropi_product = null
+        $dropi_product = null,
+        $clean_existing_variations = 'false'
     ) {
         $success = false;
         $message = '';
@@ -388,6 +389,15 @@ class JPIODFW_ProductsModel
 
             if (is_int($post_id) && $post_id > 0) {
 
+                if (
+                    $productaction === 'SYNC' &&
+                    ($clean_existing_variations === 'true' || $clean_existing_variations === true) &&
+                    $variationstoimport != null &&
+                    sizeof($variationstoimport) > 0
+                ) {
+                    $this->delete_product_variations($post_id);
+                    $chose_variations = array();
+                }
 
                 //esto es pa crear los atributos si no existen
                 if ($attributes != null && sizeof($attributes) > 0) {
@@ -411,6 +421,11 @@ class JPIODFW_ProductsModel
                                     $varianExisttId = $chose[$variation->id];
                                 }
                             }
+
+                            if ($varianExisttId === false && !empty($variation->sku)) {
+                                $varianExisttId = $this->get_variant_by_sku($post_id, $variation->sku);
+                            }
+
                             // la variable no xiste la creo
                             $variation_data =  array(
                                 'sku'           => $variation->sku,
@@ -843,6 +858,32 @@ class JPIODFW_ProductsModel
 
 
         return $existe;
+    }
+
+    private function delete_product_variations($product_id)
+    {
+        $product = wc_get_product($product_id);
+
+        if (!is_object($product) || !$product->is_type('variable')) {
+            return;
+        }
+
+        foreach ($product->get_children() as $variation_id) {
+            $attachments = get_children(array(
+                'post_parent' => $variation_id,
+                'post_type' => 'attachment',
+                'numberposts' => -1,
+                'fields' => 'ids',
+            ));
+
+            if (!empty($attachments)) {
+                foreach ($attachments as $attachment_id) {
+                    wp_delete_attachment($attachment_id, true);
+                }
+            }
+
+            wp_delete_post($variation_id, true);
+        }
     }
 
 

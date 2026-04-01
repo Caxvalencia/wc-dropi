@@ -134,6 +134,7 @@ class JPIODFW_Products
             $productaction = isset($_REQUEST['productaction']) ? $_REQUEST['productaction'] : [];
             $productselect = isset($_REQUEST['productselect']) ? $_REQUEST['productselect'] : [];
             $id_store = isset($_REQUEST['store']) ? sanitize_text_field(wp_unslash($_REQUEST['store'])) : '';
+            $clean_existing_variations = isset($_REQUEST['clean_existing_variations']) ? wp_unslash($_REQUEST['clean_existing_variations']) : 'false';
 
             $store = $this->TokenModel->getTokenById(intval($id_store));
 
@@ -165,7 +166,9 @@ class JPIODFW_Products
                 $chose_variations,
                 $attributes,
                 $sob_stock,
-                $store
+                $store,
+                null,
+                $clean_existing_variations
             );
 
 
@@ -227,6 +230,7 @@ class JPIODFW_Products
             $sob_precio = isset($_REQUEST['sob_precio']) ? wp_unslash($_REQUEST['sob_precio']) : 'true';
             $sob_images = isset($_REQUEST['sob_images']) ? wp_unslash($_REQUEST['sob_images']) : 'true';
             $sob_stock = isset($_REQUEST['sob_stock']) ? wp_unslash($_REQUEST['sob_stock']) : 'true';
+            $clean_existing_variations = isset($_REQUEST['clean_existing_variations']) ? wp_unslash($_REQUEST['clean_existing_variations']) : 'false';
             $variationstoimport = array();
             $variations = array();
             $attributes = array();
@@ -276,7 +280,8 @@ class JPIODFW_Products
                 $attributes,
                 $sob_stock,
                 $store,
-                $dropi_product
+                $dropi_product,
+                $clean_existing_variations
             );
 
             $imported_post_id = $existing_product_id;
