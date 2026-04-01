@@ -1,5 +1,9 @@
 # Dropify for WooCommerce
 
+> Disclaimer
+>
+> Este repositorio es un fork/adaptación para uso personal. El plugin original no es de mi autoría y los cambios documentados aquí fueron realizados únicamente para cubrir mis necesidades operativas y de desarrollo.
+
 Plugin de WordPress para importar productos desde Dropi hacia WooCommerce y enviar pedidos de WooCommerce a Dropi.
 
 Versión actual: `4.7.2`
