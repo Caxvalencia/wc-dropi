@@ -801,8 +801,6 @@ class JPIODFW_ProductsModel
 
             $variation->set_weight(''); // weight (reseting)
 
-            $dropi_variation->warehouse_product_variation = array();
-
             update_post_meta($variation_id,  '_dropi_variation', serialize($dropi_variation));
 
 
@@ -812,6 +810,16 @@ class JPIODFW_ProductsModel
             $variation->apply_changes(); // Save the data
             $variation->save(); // Save the data
             $variation->save_meta_data(); // Save the data
+
+            if (array_key_exists('stock_qty', $variation_data) && $variation_data['stock_qty'] !== null && $variation_data['stock_qty'] !== '') {
+                update_post_meta($variation_id, '_manage_stock', 'yes');
+                update_post_meta($variation_id, '_stock', $stock_quantity);
+                update_post_meta($variation_id, '_stock_status', $stock_quantity > 0 ? 'instock' : 'outofstock');
+            } else {
+                update_post_meta($variation_id, '_manage_stock', 'no');
+                delete_post_meta($variation_id, '_stock');
+                update_post_meta($variation_id, '_stock_status', 'outofstock');
+            }
 
 
             $dropi_variation = get_post_meta($variation_id, '_dropi_variation', true);

@@ -14,6 +14,9 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
   - Progreso por producto dentro de la modal.
   - Importación automática de variaciones cuando el producto Dropi es variable.
 - Resumen visual al final de la modal con los IDs que no pudieron importarse.
+- Columna `Precio Proveedor` en la lista de productos de WooCommerce para productos sincronizados con Dropi.
+- Opción para limpiar variaciones existentes al sincronizar un producto variable ya vinculado, tanto en importación individual como en importación masiva.
+- Acción `Re-sincronizar Dropi` en la lista de productos de WooCommerce para productos ya importados.
 
 ### Corregido
 - Importación de imágenes de productos:
@@ -33,6 +36,15 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 - Respuesta AJAX del importador masivo:
   - Se evita contaminar el JSON con notices HTML.
   - Se devuelve `post_id` tanto en creación como en actualización.
+- Sincronización de productos variables:
+  - Se corrigió la actualización de inventario en variaciones existentes.
+  - Se corrigió la persistencia de `_stock`, `_manage_stock` y `_stock_status`.
+  - Se corrigió la asignación de imagen a cada variación.
+  - Se dejó de perder la información de `warehouse_product_variation` al guardar `_dropi_variation`.
+  - Se corrigieron casos donde el nombre del atributo de variación llegaba en una estructura distinta.
+  - Se evitó el uso de un `variation_id` indefinido en ciertos flujos de sincronización.
+- Sincronización del producto `652784`:
+  - Se validó y corrigió la actualización de stock para las variaciones `AR-191AZU`, `AR-191VIN` y `AR-191VER`.
 
 ### Mejorado
 - Manejo de rate limiting de Dropi:
@@ -44,8 +56,17 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
   - Se aumentó la pausa entre productos en el flujo masivo para bajar la presión sobre el API.
 - Trazabilidad de productos importados:
   - Se añadió una búsqueda de producto WooCommerce por `_dropi_product_id` y token para detectar importaciones existentes y sincronizar en vez de duplicar.
+- Reuso de variaciones existentes:
+  - Cuando no hay mapeo manual, el plugin ahora intenta vincular variaciones por SKU antes de crear nuevas.
+  - Esto evita duplicados en sincronizaciones individuales y masivas.
+- Persistencia de datos Dropi en WooCommerce:
+  - Se guarda `_dropi_supplier_price` para facilitar la visualización del precio proveedor en el admin.
 
 ### Validado
 - Se levantó y configuró el stack local con WordPress, WooCommerce y el plugin activo.
 - Se probaron importaciones reales por AJAX contra varios `product id` que previamente fallaban.
 - Se verificó que el flujo masivo ya no cae con `Internal Server Error` cuando Dropi rate-limita o devuelve respuesta inválida.
+- Se verificó la limpieza de un producto variable con historial de duplicados, pasando de 12 variaciones a 4 variaciones correctas.
+- Se verificó una segunda sincronización posterior sin limpieza y sin duplicación de variaciones.
+- Se validó en local la acción de `Re-sincronizar Dropi` desde la lista de productos de WooCommerce.
+- Se validó la sincronización final de stock e imagen para variaciones ya existentes.

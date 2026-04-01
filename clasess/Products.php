@@ -350,6 +350,166 @@ class JPIODFW_Products
         ]);
     }
 
+    public function add_dropi_product_row_actions($actions, $post)
+    {
+        if (!is_object($post) || $post->post_type !== 'product') {
+            return $actions;
+        }
+
+        $dropi_product_id = get_post_meta($post->ID, '_dropi_product_id', true);
+
+        if (empty($dropi_product_id)) {
+            return $actions;
+        }
+
+        $resync_url = wp_nonce_url(
+            admin_url('admin.php?action=dropi_resync_product&product_id=' . absint($post->ID)),
+            'dropi_resync_product_' . absint($post->ID)
+        );
+
+        $actions['dropi_resync_product'] = '<a href="' . esc_url($resync_url) . '">' . esc_html__('Re-sincronizar Dropi', 'wc-dropi-integration') . '</a>';
+
+        return $actions;
+    }
+
+    public function handle_dropi_resync_product_action()
+    {
+        if (!current_user_can('edit_products')) {
+            wp_die(__('No tienes permisos para realizar esta acción.', 'wc-dropi-integration'));
+        }
+
+        $product_id = isset($_GET['product_id']) ? absint(wp_unslash($_GET['product_id'])) : 0;
+
+        if ($product_id <= 0) {
+            wp_safe_redirect(admin_url('edit.php?post_type=product'));
+            exit;
+        }
+
+        check_admin_referer('dropi_resync_product_' . $product_id);
+
+        $dropi_product_id = absint(get_post_meta($product_id, '_dropi_product_id', true));
+        $dropi_token = get_post_meta($product_id, '_dropi_token', true);
+
+        if ($dropi_product_id <= 0 || empty($dropi_token)) {
+            wp_safe_redirect(
+                add_query_arg(
+                    array(
+                        'post_type' => 'product',
+                        'dropi_resync' => 'error',
+                        'dropi_message' => rawurlencode('El producto no tiene datos de sincronización de Dropi.'),
+                    ),
+                    admin_url('edit.php')
+                )
+            );
+            exit;
+        }
+
+        $store = array();
+        $all_tokens = $this->TokenModel->getTokens();
+        foreach ($all_tokens as $token_item) {
+            if (isset($token_item->token) && $token_item->token === $dropi_token) {
+                $store = array($token_item);
+                break;
+            }
+        }
+
+        if (empty($store) || !isset($store[0]->token)) {
+            wp_safe_redirect(
+                add_query_arg(
+                    array(
+                        'post_type' => 'product',
+                        'dropi_resync' => 'error',
+                        'dropi_message' => rawurlencode('No se encontró el token de la tienda para re-sincronizar.'),
+                    ),
+                    admin_url('edit.php')
+                )
+            );
+            exit;
+        }
+
+        $dropi_product = $this->ProducstInstance->getProduct($dropi_product_id, $store[0]->token);
+
+        if (!is_object($dropi_product)) {
+            wp_safe_redirect(
+                add_query_arg(
+                    array(
+                        'post_type' => 'product',
+                        'dropi_resync' => 'error',
+                        'dropi_message' => rawurlencode('Dropi no devolvió información válida para este producto.'),
+                    ),
+                    admin_url('edit.php')
+                )
+            );
+            exit;
+        }
+
+        $variationstoimport = array();
+        $variations = array();
+        $attributes = array();
+
+        if (isset($dropi_product->type) && $dropi_product->type === 'VARIABLE' && !empty($dropi_product->variations)) {
+            $variations = $dropi_product->variations;
+
+            foreach ($dropi_product->variations as $variation) {
+                if (isset($variation->id)) {
+                    $variationstoimport[] = $variation->id;
+                }
+            }
+
+            if (isset($dropi_product->attributes) && is_array($dropi_product->attributes)) {
+                $attributes = $dropi_product->attributes;
+            }
+        }
+
+        $result = $this->ProducstInstance->import_product(
+            $dropi_product_id,
+            null,
+            null,
+            null,
+            'true',
+            'true',
+            'true',
+            'true',
+            $variationstoimport,
+            'SYNC',
+            $product_id,
+            $variations,
+            array(),
+            $attributes,
+            'true',
+            $store,
+            $dropi_product,
+            'false'
+        );
+
+        $redirect_args = array(
+            'post_type' => 'product',
+            'dropi_resync' => !empty($result['success']) ? 'success' : 'error',
+            'dropi_message' => rawurlencode(!empty($result['success']) ? 'Producto re-sincronizado correctamente.' : (isset($result['message']) ? $result['message'] : 'No fue posible re-sincronizar el producto.')),
+        );
+
+        wp_safe_redirect(add_query_arg($redirect_args, admin_url('edit.php')));
+        exit;
+    }
+
+    public function maybe_show_dropi_resync_notice()
+    {
+        if (!isset($_GET['dropi_resync'], $_GET['dropi_message'])) {
+            return;
+        }
+
+        $screen_post_type = isset($_GET['post_type']) ? sanitize_text_field(wp_unslash($_GET['post_type'])) : '';
+
+        if ($screen_post_type !== 'product') {
+            return;
+        }
+
+        $type = sanitize_text_field(wp_unslash($_GET['dropi_resync'])) === 'success' ? 'notice notice-success' : 'notice notice-error';
+        $message = sanitize_text_field(wp_unslash($_GET['dropi_message']));
+
+        echo '<div class="' . esc_attr($type) . ' is-dismissible"><p>' . esc_html($message) . '</p></div>';
+    }
+
     /**funcion que va amostrar en la lista de productos si ya etsa sincronizado con dropi */
     function show_custom_product_column_values($column, $post_id)
     {
@@ -454,5 +614,8 @@ class JPIODFW_Products
 
         //MOSTRAR NUEVA COLUMNA EN LISTA DE PRODUCTS
         add_action('manage_product_posts_custom_column', array($this, 'show_custom_product_column_values'), 20, 2);
+        add_filter('post_row_actions', array($this, 'add_dropi_product_row_actions'), 10, 2);
+        add_action('admin_action_dropi_resync_product', array($this, 'handle_dropi_resync_product_action'));
+        add_action('admin_notices', array($this, 'maybe_show_dropi_resync_notice'));
     }
 }
