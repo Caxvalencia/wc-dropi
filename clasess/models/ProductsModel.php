@@ -532,6 +532,9 @@ class JPIODFW_ProductsModel
                 update_post_meta($post_id, '_dropi_product_id', $product->id);
                 update_post_meta($post_id, '_dropi_token_store', $selected_store->store);
                 update_post_meta($post_id, '_dropi_token', $selected_store->token);
+                if (isset($product->sale_price) && $product->sale_price !== null && $product->sale_price !== '') {
+                    update_post_meta($post_id, '_dropi_supplier_price', $product->sale_price);
+                }
 
                 // update_post_meta($post_id, '_stock_status', 'instock');
                 if ($sob_images == 'true' || $sob_images == null) {
