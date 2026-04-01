@@ -4,6 +4,8 @@ Plugin de WordPress para importar productos desde Dropi hacia WooCommerce y envi
 
 Versión actual: `4.7.2`
 
+Repositorio: `https://github.com/Caxvalencia/wc-dropi`
+
 ## Qué hace
 
 - Lista productos de Dropi desde el panel de WordPress.
@@ -72,7 +74,7 @@ En el trabajo reciente sobre este repositorio se hicieron estos ajustes relevant
 - resumen visual de IDs fallidos al final de la importación masiva,
 - entorno local con Docker y empaquetado final por `Makefile`.
 
-El detalle completo está en [CHANGELOG.md](/Users/cax/Desktop/projects/wc-dropi-integration/CHANGELOG.md).
+El detalle completo está en [CHANGELOG.md](./CHANGELOG.md).
 
 ## Desarrollo local
 
@@ -102,17 +104,17 @@ El zip final se genera en `dist/`.
 
 ## Estructura relevante
 
-- [wc-dropi-integration.php](/Users/cax/Desktop/projects/wc-dropi-integration/wc-dropi-integration.php): bootstrap del plugin
-- [clasess/Dropi.php](/Users/cax/Desktop/projects/wc-dropi-integration/clasess/Dropi.php): inicialización general
-- [clasess/Products.php](/Users/cax/Desktop/projects/wc-dropi-integration/clasess/Products.php): controlador de productos y AJAX
-- [clasess/models/ProductsModel.php](/Users/cax/Desktop/projects/wc-dropi-integration/clasess/models/ProductsModel.php): lógica de importación y sincronización
-- [clasess/Woocomerce.php](/Users/cax/Desktop/projects/wc-dropi-integration/clasess/Woocomerce.php): integración con pedidos WooCommerce
-- [js/product-events.js](/Users/cax/Desktop/projects/wc-dropi-integration/js/product-events.js): interacciones del panel de productos
+- [wc-dropi-integration.php](./wc-dropi-integration.php): bootstrap del plugin
+- [clasess/Dropi.php](./clasess/Dropi.php): inicialización general
+- [clasess/Products.php](./clasess/Products.php): controlador de productos y AJAX
+- [clasess/models/ProductsModel.php](./clasess/models/ProductsModel.php): lógica de importación y sincronización
+- [clasess/Woocomerce.php](./clasess/Woocomerce.php): integración con pedidos WooCommerce
+- [js/product-events.js](./js/product-events.js): interacciones del panel de productos
 
 ## Documentación adicional
 
-- API Dropi CO por `curl`: [DROPI-CO-API-CURL.md](/Users/cax/Desktop/projects/wc-dropi-integration/DROPI-CO-API-CURL.md)
-- Historial de cambios: [CHANGELOG.md](/Users/cax/Desktop/projects/wc-dropi-integration/CHANGELOG.md)
+- API Dropi CO por `curl`: [DROPI-CO-API-CURL.md](./DROPI-CO-API-CURL.md)
+- Historial de cambios: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Troubleshooting
 
