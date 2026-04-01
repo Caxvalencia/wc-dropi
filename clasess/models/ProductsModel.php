@@ -281,13 +281,45 @@ class JPIODFW_ProductsModel
             array(
                 'post_type' => 'product',
                 'post_status' => array('publish', 'draft', 'pending', 'private'),
-                'posts_per_page' => 1,
+                'posts_per_page' => 20,
                 'fields' => 'ids',
                 'meta_query' => $meta_query,
             )
         );
 
         if (!empty($query->posts)) {
+            $best_product_id = null;
+            $best_score = -1;
+
+            foreach ($query->posts as $candidate_id) {
+                $candidate_id = intval($candidate_id);
+                $variation_ids = get_posts(
+                    array(
+                        'post_type' => 'product_variation',
+                        'post_parent' => $candidate_id,
+                        'numberposts' => -1,
+                        'fields' => 'ids',
+                    )
+                );
+
+                $valid_sku_variations = 0;
+                foreach ($variation_ids as $variation_id) {
+                    if (get_post_meta($variation_id, '_sku', true) !== '') {
+                        $valid_sku_variations++;
+                    }
+                }
+
+                $score = ($valid_sku_variations * 10) + count($variation_ids);
+                if ($score > $best_score) {
+                    $best_score = $score;
+                    $best_product_id = $candidate_id;
+                }
+            }
+
+            if (!empty($best_product_id)) {
+                return intval($best_product_id);
+            }
+
             return intval($query->posts[0]);
         }
 
@@ -318,6 +350,8 @@ class JPIODFW_ProductsModel
     ) {
         $success = false;
         $message = '';
+        $variation_errors = array();
+        $created_new_post = false;
 
         try {
             //busco la data del producto en dropi
@@ -348,6 +382,14 @@ class JPIODFW_ProductsModel
                     'success' => false,
                     'message' => 'Dropi no devolvio informacion valida para este producto. Intenta nuevamente.',
                 );
+            }
+
+            if ($productaction !== 'SYNC' && isset($product->id)) {
+                $existing_imported_post_id = $this->getImportedProductByDropiId($product->id, $token);
+                if (!empty($existing_imported_post_id)) {
+                    $productaction = 'SYNC';
+                    $productselect = intval($existing_imported_post_id);
+                }
             }
 
             if ($product->description == null) {
@@ -383,6 +425,7 @@ class JPIODFW_ProductsModel
                 }
             } else {
                 $post_id = wp_insert_post($post);
+                $created_new_post = is_int($post_id) && $post_id > 0;
             }
 
 
@@ -441,7 +484,11 @@ class JPIODFW_ProductsModel
 
                                 if (isset($variation->warehouse_product_variation)) {
                                     foreach ($variation->warehouse_product_variation as $ware) {
-                                        $finalStockByWarehouse = $finalStockByWarehouse + $ware->stock;
+                                        if (is_array($ware) && isset($ware['stock'])) {
+                                            $finalStockByWarehouse += intval($ware['stock']);
+                                        } elseif (is_object($ware) && isset($ware->stock)) {
+                                            $finalStockByWarehouse += intval($ware->stock);
+                                        }
                                     }
                                     $variation_data['stock_qty'] = $finalStockByWarehouse;
                                 }
@@ -478,8 +525,21 @@ class JPIODFW_ProductsModel
                             }
 
 
-                            $message = $this->create_product_variation($post_id, $variation_data, $variation, $varianExisttId);
+                            $variation_result = $this->create_product_variation($post_id, $variation_data, $variation, $varianExisttId);
+                            if (!empty($variation_result)) {
+                                $variation_errors[] = 'Variación ' . (isset($variation->sku) ? $variation->sku : $variation->id) . ': ' . $variation_result;
+                            }
                         }
+                    }
+
+                    if (!empty($variation_errors) && $created_new_post === true) {
+                        $this->delete_product_variations($post_id);
+                        wp_delete_post($post_id, true);
+
+                        return array(
+                            'success' => false,
+                            'message' => implode(' | ', $variation_errors),
+                        );
                     }
                 } else {
                     wp_set_object_terms($post_id, 'simple', 'product_type');
@@ -498,7 +558,7 @@ class JPIODFW_ProductsModel
 
 
                     $category = get_term_by('name', $cat_name, 'product_cat');
-                    $category_id = $category->term_id;
+                    $category_id = (is_object($category) && isset($category->term_id)) ? $category->term_id : 0;
 
                     if (empty($category_id) && !empty($cat_name)) {
                         //creo la categoria si no existe
@@ -585,7 +645,12 @@ class JPIODFW_ProductsModel
                 }
 
                 $this->setImportedOnImportLits($product, $post_id, $token);
-                $success = true;
+                if (!empty($variation_errors)) {
+                    $message = implode(' | ', $variation_errors);
+                    $success = false;
+                } else {
+                    $success = true;
+                }
             } else {
 
                 if (is_wp_error($post_id)) {
@@ -714,6 +779,21 @@ class JPIODFW_ProductsModel
             );
 
             //$variation_id = $this->get_variant_by_sku($product_id, $variation_data['sku']);
+
+            if ($variation_id == false && !empty($variation_data['sku'])) {
+                $global_sku_post_id = absint($this->get_product_by_sku($variation_data['sku']));
+
+                if ($global_sku_post_id > 0) {
+                    $global_parent_id = absint(wp_get_post_parent_id($global_sku_post_id));
+
+                    if ($global_parent_id === absint($product_id)) {
+                        $variation_id = $global_sku_post_id;
+                        $create = false;
+                    } else {
+                        return 'Invalid or duplicated SKU.';
+                    }
+                }
+            }
 
             // si no viene la variable por chosen, y no existe una variable con ese sku, la creo
             if ($variation_id == false) {
