@@ -23,6 +23,8 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
   - Se reemplazó la descarga directa con `file_get_contents()` por sideload usando APIs de WordPress/WooCommerce.
   - Se normalizaron URLs de imágenes para evitar archivos vacíos o rutas inválidas.
   - Se corrigió la asignación de imagen destacada y galería.
+  - Ahora los attachments de Dropi se reutilizan si la imagen ya había sido importada antes, evitando descargas y duplicados innecesarios.
+  - La galería del producto se deduplica antes de guardarse en WooCommerce.
 - Importación de contenido del producto:
   - Se preserva mejor la descripción HTML y los acentos.
   - Se corrigió el saneamiento de datos en el flujo AJAX para no degradar el contenido.
@@ -40,9 +42,12 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
   - Se corrigió la actualización de inventario en variaciones existentes.
   - Se corrigió la persistencia de `_stock`, `_manage_stock` y `_stock_status`.
   - Se corrigió la asignación de imagen a cada variación.
+  - Las variaciones ya no reciben automáticamente la imagen principal del producto cuando Dropi no trae una imagen específica para esa variación.
+  - Si una variación no tiene foto propia en Dropi, se limpia `_thumbnail_id` para evitar duplicados visuales y media redundante.
   - Se dejó de perder la información de `warehouse_product_variation` al guardar `_dropi_variation`.
   - Se corrigieron casos donde el nombre del atributo de variación llegaba en una estructura distinta.
   - Se evitó el uso de un `variation_id` indefinido en ciertos flujos de sincronización.
+  - Al limpiar variaciones existentes, ya no se borran attachments físicos asociados a esas variaciones para no eliminar media reutilizada por error.
 - Sincronización del producto `652784`:
   - Se validó y corrigió la actualización de stock para las variaciones `AR-191AZU`, `AR-191VIN` y `AR-191VER`.
 
@@ -75,3 +80,5 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 - Se verificó una segunda sincronización posterior sin limpieza y sin duplicación de variaciones.
 - Se validó en local la acción de `Re-sincronizar Dropi` desde la lista de productos de WooCommerce.
 - Se validó la sincronización final de stock e imagen para variaciones ya existentes.
+- Se validó que dos re-sincronizaciones consecutivas del producto `2097766` no crean nuevos attachments y que sus variaciones no duplican la imagen principal.
+- Se validó que dos re-sincronizaciones consecutivas del producto `652784` no crean nuevos attachments y conservan solo las miniaturas de variación que realmente existen en Dropi.

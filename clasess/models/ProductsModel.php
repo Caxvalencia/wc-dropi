@@ -325,6 +325,62 @@ class JPIODFW_ProductsModel
         return null;
     }
 
+    private function buildAttributesFromVariations($variations)
+    {
+        if (!is_array($variations)) {
+            return array();
+        }
+
+        $attributes_map = array();
+
+        foreach ($variations as $variation) {
+            $variation = (object) $variation;
+
+            if (empty($variation->attribute_values) || !is_array($variation->attribute_values)) {
+                continue;
+            }
+
+            foreach ($variation->attribute_values as $attribute_value) {
+                $attribute_value = (object) $attribute_value;
+                $attribute_name = '';
+                $attribute_option = isset($attribute_value->value) ? trim((string) $attribute_value->value) : '';
+
+                if (isset($attribute_value->attribute_name) && $attribute_value->attribute_name !== '') {
+                    $attribute_name = trim((string) $attribute_value->attribute_name);
+                } elseif (isset($attribute_value->attribute) && is_object($attribute_value->attribute) && isset($attribute_value->attribute->description)) {
+                    $attribute_name = trim((string) $attribute_value->attribute->description);
+                }
+
+                if ($attribute_name === '' || $attribute_option === '') {
+                    continue;
+                }
+
+                if (!isset($attributes_map[$attribute_name])) {
+                    $attributes_map[$attribute_name] = array();
+                }
+
+                if (!in_array($attribute_option, $attributes_map[$attribute_name], true)) {
+                    $attributes_map[$attribute_name][] = $attribute_option;
+                }
+            }
+        }
+
+        $attributes = array();
+        foreach ($attributes_map as $attribute_name => $attribute_options) {
+            $values = array();
+            foreach ($attribute_options as $attribute_option) {
+                $values[] = array('value' => $attribute_option);
+            }
+
+            $attributes[] = (object) array(
+                'description' => $attribute_name,
+                'values' => $values,
+            );
+        }
+
+        return $attributes;
+    }
+
     public function getImportedProductByDropiId($dropi_product_id, $token = null)
     {
         $meta_query = array(
@@ -498,6 +554,10 @@ class JPIODFW_ProductsModel
 
             if (is_int($post_id) && $post_id > 0) {
                 $product_sku = $this->buildProductSku($product, $post_id);
+
+                if ((empty($attributes) || !is_array($attributes)) && $variationstoimport != null && sizeof($variationstoimport) > 0 && is_array($variations)) {
+                    $attributes = $this->buildAttributesFromVariations($variations);
+                }
 
                 if (
                     $productaction === 'SYNC' &&
@@ -959,6 +1019,9 @@ class JPIODFW_ProductsModel
                     $variation->set_image_id($variation_image_id);
                     update_post_meta($variation_id, '_thumbnail_id', $variation_image_id);
                 }
+            } elseif (array_key_exists('image', $variation_data)) {
+                $variation->set_image_id(0);
+                delete_post_meta($variation_id, '_thumbnail_id');
             }
 
             $variation->set_weight(''); // weight (reseting)
@@ -978,6 +1041,10 @@ class JPIODFW_ProductsModel
             $variation->apply_changes(); // Save the data
             $variation->save(); // Save the data
             $variation->save_meta_data(); // Save the data
+
+            if (!empty($variation_data['sku'])) {
+                update_post_meta($variation_id, '_sku', $variation_data['sku']);
+            }
 
             if (array_key_exists('stock_qty', $variation_data) && $variation_data['stock_qty'] !== null && $variation_data['stock_qty'] !== '') {
                 update_post_meta($variation_id, '_manage_stock', 'yes');
@@ -1045,19 +1112,6 @@ class JPIODFW_ProductsModel
         }
 
         foreach ($product->get_children() as $variation_id) {
-            $attachments = get_children(array(
-                'post_parent' => $variation_id,
-                'post_type' => 'attachment',
-                'numberposts' => -1,
-                'fields' => 'ids',
-            ));
-
-            if (!empty($attachments)) {
-                foreach ($attachments as $attachment_id) {
-                    wp_delete_attachment($attachment_id, true);
-                }
-            }
-
             wp_delete_post($variation_id, true);
         }
     }
@@ -1143,6 +1197,8 @@ class JPIODFW_ProductsModel
                 }
             }
 
+            $attachment_ids = array_values(array_unique(array_map('intval', $attachment_ids)));
+
             if (empty($attachment_ids)) {
                 return;
             }
@@ -1174,27 +1230,25 @@ class JPIODFW_ProductsModel
             return null;
         }
 
-        $fallback_image = null;
-
         foreach ($photos as $photo) {
-            if (!is_object($photo)) {
+            if (!is_object($photo) && !is_array($photo)) {
                 continue;
             }
 
-            if ($fallback_image === null) {
-                $fallback_image = $photo;
+            $photo_variation_id = '';
+
+            if (is_object($photo) && isset($photo->variation_id)) {
+                $photo_variation_id = $photo->variation_id;
+            } elseif (is_array($photo) && isset($photo['variation_id'])) {
+                $photo_variation_id = $photo['variation_id'];
             }
 
-            if (!empty($photo->main)) {
-                $fallback_image = $photo;
-            }
-
-            if (isset($photo->variation_id) && intval($photo->variation_id) === intval($variation->id)) {
+            if ($photo_variation_id !== '' && intval($photo_variation_id) === intval($variation->id)) {
                 return $photo;
             }
         }
 
-        return $fallback_image;
+        return null;
     }
 
     private function importDropiImageAttachment($post_id, $img)
@@ -1210,6 +1264,13 @@ class JPIODFW_ProductsModel
         }
 
         $image_name = $this->getDropiImageFilename($img, $image_url);
+        $existing_attachment_id = $this->findExistingDropiAttachment($img, $image_url, $image_name);
+
+        if (!empty($existing_attachment_id)) {
+            $this->persistDropiAttachmentMeta($existing_attachment_id, $img, $image_url, $image_name);
+            return $existing_attachment_id;
+        }
+
         $tmp_file = download_url($image_url, 120);
 
         if (is_wp_error($tmp_file)) {
@@ -1239,11 +1300,120 @@ class JPIODFW_ProductsModel
             return 0;
         }
 
+        $this->persistDropiAttachmentMeta($attach_id, $img, $image_url, $image_name);
+
         return intval($attach_id);
+    }
+
+    private function findExistingDropiAttachment($img, $image_url, $image_name)
+    {
+        $source_key = $this->getDropiImageSourceKey($img, $image_url);
+
+        if ($source_key !== '') {
+            $attachment_id = $this->findAttachmentByMeta('_dropi_image_source_key', $source_key);
+
+            if (!empty($attachment_id)) {
+                return $attachment_id;
+            }
+        }
+
+        $source_id = $this->getDropiImageSourceId($img);
+
+        if ($source_id !== '') {
+            $attachment_id = $this->findAttachmentByMeta('_dropi_image_source_id', $source_id);
+
+            if (!empty($attachment_id)) {
+                return $attachment_id;
+            }
+        }
+
+        if ($image_url !== '') {
+            $attachment_id = $this->findAttachmentByMeta('_dropi_image_source_url', $image_url);
+
+            if (!empty($attachment_id)) {
+                return $attachment_id;
+            }
+        }
+
+        return $this->findAttachmentByFileName($image_name);
+    }
+
+    private function findAttachmentByMeta($meta_key, $meta_value)
+    {
+        $attachments = get_posts(array(
+            'post_type' => 'attachment',
+            'post_status' => 'inherit',
+            'posts_per_page' => 1,
+            'fields' => 'ids',
+            'meta_key' => $meta_key,
+            'meta_value' => $meta_value,
+            'orderby' => 'ID',
+            'order' => 'ASC',
+        ));
+
+        if (empty($attachments)) {
+            return 0;
+        }
+
+        return absint($attachments[0]);
+    }
+
+    private function findAttachmentByFileName($image_name)
+    {
+        global $wpdb;
+
+        $query = $wpdb->prepare(
+            "SELECT post_id
+            FROM {$wpdb->postmeta}
+            WHERE meta_key = '_wp_attached_file'
+              AND (meta_value = %s OR meta_value LIKE %s)
+            ORDER BY post_id ASC
+            LIMIT 1",
+            $image_name,
+            '%/' . $wpdb->esc_like($image_name)
+        );
+
+        $attachment_id = $wpdb->get_var($query);
+
+        if (empty($attachment_id)) {
+            return 0;
+        }
+
+        return absint($attachment_id);
+    }
+
+    private function persistDropiAttachmentMeta($attachment_id, $img, $image_url, $image_name)
+    {
+        if (empty($attachment_id)) {
+            return;
+        }
+
+        $source_key = $this->getDropiImageSourceKey($img, $image_url);
+        $source_id = $this->getDropiImageSourceId($img);
+
+        if ($source_key !== '') {
+            update_post_meta($attachment_id, '_dropi_image_source_key', $source_key);
+        }
+
+        if ($source_id !== '') {
+            update_post_meta($attachment_id, '_dropi_image_source_id', $source_id);
+        }
+
+        if ($image_url !== '') {
+            update_post_meta($attachment_id, '_dropi_image_source_url', $image_url);
+        }
+
+        if ($image_name !== '') {
+            update_post_meta($attachment_id, '_dropi_image_source_filename', $image_name);
+        }
     }
 
     private function getDropiImageUrl($img)
     {
+        if (is_array($img)) {
+            $img = (object)$img;
+        }
+
         if (!is_object($img)) {
             return '';
         }
@@ -1261,6 +1431,10 @@ class JPIODFW_ProductsModel
 
     private function getDropiImageFilename($img, $image_url)
     {
+        if (is_array($img)) {
+            $img = (object)$img;
+        }
+
         $path = wp_parse_url($image_url, PHP_URL_PATH);
         $extension = pathinfo($path, PATHINFO_EXTENSION);
 
@@ -1271,6 +1445,38 @@ class JPIODFW_ProductsModel
         $image_id = isset($img->id) ? $img->id : uniqid('dropi_', true);
 
         return sanitize_file_name($image_id . '.' . strtolower($extension));
+    }
+
+    private function getDropiImageSourceId($img)
+    {
+        if (is_array($img)) {
+            $img = (object)$img;
+        }
+
+        if (!is_object($img) || !isset($img->id) || $img->id === '') {
+            return '';
+        }
+
+        return sanitize_text_field((string)$img->id);
+    }
+
+    private function getDropiImageSourceKey($img, $image_url = '')
+    {
+        $source_id = $this->getDropiImageSourceId($img);
+
+        if ($source_id !== '') {
+            return 'dropi-id:' . $source_id;
+        }
+
+        if ($image_url === '') {
+            $image_url = $this->getDropiImageUrl($img);
+        }
+
+        if ($image_url === '') {
+            return '';
+        }
+
+        return 'dropi-url:' . md5($image_url);
     }
 
     private function normalizeRemoteUrl($url)
