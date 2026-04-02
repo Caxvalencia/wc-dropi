@@ -51,6 +51,11 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
   - `getProduct()` ahora hace más reintentos.
   - Se detecta `Too Many Attempts` y HTTP `429`.
   - Se añadió backoff progresivo entre intentos.
+- Estrategia de SKU para productos importados desde Dropi:
+  - El producto padre ahora usa siempre el formato `DROPI-<product_id>`.
+  - Las variaciones ahora usan el formato `DROPI-<product_id>-DV<variation_id>`.
+  - Se deja de depender del SKU original de Dropi como identificador principal en WooCommerce.
+  - Esto reduce colisiones futuras con SKUs existentes en la tienda.
 - Eficiencia del importador masivo:
   - El backend reutiliza la primera respuesta de Dropi y evita pedir el mismo producto dos veces por cada ID.
   - Se aumentó la pausa entre productos en el flujo masivo para bajar la presión sobre el API.

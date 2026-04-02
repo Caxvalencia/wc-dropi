@@ -259,46 +259,38 @@ class JPIODFW_ProductsModel
         return null;
     }
 
+    private function buildProductSku($product, $current_product_id = 0)
+    {
+        $dropi_product_id = isset($product->id) ? absint($product->id) : 0;
+        if ($dropi_product_id > 0) {
+            return 'DROPI-' . $dropi_product_id;
+        }
+
+        $raw_sku = isset($product->sku) ? trim((string) $product->sku) : '';
+        $raw_sku = preg_replace('/\s+/', '', $raw_sku);
+        $raw_sku = preg_replace('/[^A-Za-z0-9._-]/', '-', $raw_sku);
+
+        return substr($raw_sku, 0, 100);
+    }
+
     private function buildVariationSku($product, $variation, $product_id = 0)
     {
+        $dropi_product_id = isset($product->id) ? absint($product->id) : 0;
+        $dropi_variation_id = isset($variation->id) ? absint($variation->id) : 0;
+
+        if ($dropi_product_id > 0 && $dropi_variation_id > 0) {
+            return 'DROPI-' . $dropi_product_id . '-DV' . $dropi_variation_id;
+        }
+
         $raw_sku = isset($variation->sku) ? trim((string) $variation->sku) : '';
         $raw_sku = preg_replace('/\s+/', '', $raw_sku);
         $raw_sku = preg_replace('/[^A-Za-z0-9._-]/', '-', $raw_sku);
 
-        $parent_sku = isset($product->sku) ? trim((string) $product->sku) : '';
-        $parent_sku = preg_replace('/\s+/', '', $parent_sku);
-        $parent_sku = preg_replace('/[^A-Za-z0-9._-]/', '-', $parent_sku);
-
-        $dropi_product_id = isset($product->id) ? absint($product->id) : 0;
-        $dropi_variation_id = isset($variation->id) ? absint($variation->id) : 0;
-
-        $fallback_base = $parent_sku !== '' && strtolower($parent_sku) !== 'null'
-            ? $parent_sku
-            : 'DROPI-' . $dropi_product_id;
-
-        $fallback_sku = $fallback_base . '-DV' . $dropi_variation_id;
-
-        $is_weak_sku = (
-            $raw_sku === ''
-            || strtolower($raw_sku) === 'null'
-            || preg_match('/^-\d+$/', $raw_sku)
-            || preg_match('/^null-\d+$/i', $raw_sku)
-        );
-
-        $candidate_sku = $is_weak_sku ? $fallback_sku : $raw_sku;
-
-        if ($candidate_sku !== '') {
-            $global_sku_post_id = absint($this->get_product_by_sku($candidate_sku));
-            if ($global_sku_post_id > 0) {
-                $global_parent_id = absint(wp_get_post_parent_id($global_sku_post_id));
-
-                if ($global_sku_post_id !== absint($product_id) && $global_parent_id !== absint($product_id)) {
-                    $candidate_sku = $fallback_sku;
-                }
-            }
+        if ($raw_sku !== '') {
+            return substr($raw_sku, 0, 100);
         }
 
-        return substr($candidate_sku, 0, 100);
+        return 'DROPI-' . $dropi_product_id . '-DV-' . absint($product_id);
     }
 
     private function get_variant_by_dropi_variation_id($product_id, $dropi_variation_id)
@@ -505,6 +497,7 @@ class JPIODFW_ProductsModel
 
 
             if (is_int($post_id) && $post_id > 0) {
+                $product_sku = $this->buildProductSku($product, $post_id);
 
                 if (
                     $productaction === 'SYNC' &&
@@ -675,7 +668,10 @@ class JPIODFW_ProductsModel
                 }
 
 
-                update_post_meta($post_id, '_sku', $product->sku);
+                if (!empty($product_sku)) {
+                    update_post_meta($post_id, '_sku', $product_sku);
+                }
+                update_post_meta($post_id, '_dropi_product_source_sku', isset($product->sku) ? $product->sku : '');
 
 
                 if ($sob_stock == "true") {
