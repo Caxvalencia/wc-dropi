@@ -63,13 +63,15 @@ class JPIODFW_SyncedInfo
     }
 
     function my_load_scripts()
-    {   
-        wp_enqueue_style('select2-css', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css', array(), '4.1.0-rc.0');
+    {
+        $current_page = isset($_GET['page']) ? sanitize_text_field(wp_unslash($_GET['page'])) : '';
 
-        //Add the Select2 JavaScript file
-        wp_enqueue_script('select2-js', 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js', 'jquery', '4.1.0-rc.0');
+        if ($current_page !== 'synced-prods-dropi') {
+            return;
+        }
 
         wp_enqueue_script('dropi-sweetalert2', plugin_dir_url(__DIR__) . 'js/sweetalert2@11.js', array('jquery'), date('YmdHis'));
+        wp_enqueue_script('dropi-woo-resync-confirm', plugin_dir_url(__DIR__) . 'js/woocommerce-resync-confirm.js', array('jquery', 'dropi-sweetalert2'), date('YmdHis'), true);
 
         $path = plugins_url('wc-dropi-integration/css/bootstrap.css'); //use your path of course
         $dependencies = array(); //add any depencdencies in array
@@ -87,6 +89,6 @@ class JPIODFW_SyncedInfo
         //EL MENU LATERAL
         add_action('admin_menu', array(&$this, 'register_sub_menues'));
         //LOS SCRIPTS
-        //add_action('admin_enqueue_scripts', array(&$this, 'my_load_scripts'));
+        add_action('admin_enqueue_scripts', array(&$this, 'my_load_scripts'));
     }
 }

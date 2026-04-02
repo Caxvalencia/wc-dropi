@@ -90,6 +90,12 @@ class JPIODFW_SyncedProds extends WP_List_Table
     public function column_default($item, $column_name)
     {
         switch ($column_name) {
+            case 'woo_id':
+                return $this->column_woo_id($item);
+            case 'woo_prod':
+                return $this->column_woo_prod($item);
+            case 'dropi_prod_id':
+                return $this->column_dropi_prod_id($item);
             case 'icons':
                 return $this->column_icons($item);
             default:
@@ -98,13 +104,45 @@ class JPIODFW_SyncedProds extends WP_List_Table
         }
     }
 
+    public function column_woo_id($item)
+    {
+        $edit_url = admin_url('post.php?post=' . absint($item['woo_id']) . '&action=edit');
+
+        return '<a href="' . esc_url($edit_url) . '">' . absint($item['woo_id']) . '</a>';
+    }
+
+    public function column_woo_prod($item)
+    {
+        $edit_url = admin_url('post.php?post=' . absint($item['woo_id']) . '&action=edit');
+        $title = '<strong><a href="' . esc_url($edit_url) . '">' . esc_html($item['woo_prod']) . '</a></strong>';
+
+        return $title;
+    }
+
+    public function column_dropi_prod_id($item)
+    {
+        $dropi_url = admin_url('admin.php?page=dropi-products&s=' . absint($item['dropi_prod_id']));
+
+        return '<a href="' . esc_url($dropi_url) . '">' . absint($item['dropi_prod_id']) . '</a>';
+    }
+
     public function column_icons($item)
     {
         $delete_nonce = wp_create_nonce('sp_delete_dropi_sync');
-        $url = "<a class='btn-synced-prod-dropi-delete'  data-item='" . json_encode($item) . "' data-id='" . $item['woo_id'] . "' title ='Borrar' href='?page=" . sanitize_text_field($_REQUEST['page']) . "&action=delete&woo_id=" . $item['woo_id'] . "&_wpnonce=" . $delete_nonce . "'><span class='dashicons dashicons-trash'></span></a>";
-        // $url = "<a class='btn-synced-prod-dropi-delete'><span class='dashicons dashicons-trash'></span></a>";
+        $resync_url = wp_nonce_url(
+            admin_url('admin.php?action=dropi_resync_product&product_id=' . absint($item['woo_id']) . '&return_page=synced-prods-dropi'),
+            'dropi_resync_product_' . absint($item['woo_id'])
+        );
+        $edit_url = admin_url('post.php?post=' . absint($item['woo_id']) . '&action=edit');
+        $delete_url = '?page=' . sanitize_text_field($_REQUEST['page']) . '&action=delete&woo_id=' . absint($item['woo_id']) . '&_wpnonce=' . $delete_nonce;
 
-        return $url;
+        $actions = array(
+            "<a href='" . esc_url($edit_url) . "' title='Editar producto WooCommerce'><span class='dashicons dashicons-edit'></span></a>",
+            "<a href='" . esc_url($resync_url) . "' class='dropi-resync-product-link' title='Re-sincronizar con Dropi'><span class='dashicons dashicons-update'></span></a>",
+            "<a class='btn-synced-prod-dropi-delete' data-item='" . esc_attr(wp_json_encode($item)) . "' data-id='" . absint($item['woo_id']) . "' title='Borrar sincronizacion' href='" . esc_url($delete_url) . "'><span class='dashicons dashicons-trash'></span></a>",
+        );
+
+        return implode(' ', $actions);
     }
 
     public function process_bulk_action()

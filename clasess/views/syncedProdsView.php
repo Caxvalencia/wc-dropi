@@ -26,6 +26,13 @@ class JPIODFW_SyncedProdsView
         $requirements = $this->helper->checkRequirementes();
         ?>
         <br>
+        <?php
+        if (isset($_GET['dropi_resync'], $_GET['dropi_message'])) {
+            $type = sanitize_text_field(wp_unslash($_GET['dropi_resync'])) === 'success' ? 'notice notice-success' : 'notice notice-error';
+            $message = sanitize_text_field(wp_unslash($_GET['dropi_message']));
+            echo '<div class="' . esc_attr($type) . ' is-dismissible"><p>' . esc_html($message) . '</p></div>';
+        }
+        ?>
         <h1 class="wp-heading-inline">
             Productos WooCommerce sincronizados con Dropi </h1>
         <hr class="wp-header-end">

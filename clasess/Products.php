@@ -389,6 +389,7 @@ class JPIODFW_Products
         }
 
         $product_id = isset($_GET['product_id']) ? absint(wp_unslash($_GET['product_id'])) : 0;
+        $return_page = isset($_GET['return_page']) ? sanitize_text_field(wp_unslash($_GET['return_page'])) : '';
 
         if ($product_id <= 0) {
             wp_safe_redirect(admin_url('edit.php?post_type=product'));
@@ -400,16 +401,18 @@ class JPIODFW_Products
         $dropi_product_id = absint(get_post_meta($product_id, '_dropi_product_id', true));
         $dropi_token = get_post_meta($product_id, '_dropi_token', true);
         $overwrite_variation_images = isset($_GET['overwrite_variation_images']) ? wp_unslash($_GET['overwrite_variation_images']) : 'false';
+        $redirect_base = ($return_page === 'synced-prods-dropi')
+            ? admin_url('admin.php?page=synced-prods-dropi')
+            : add_query_arg(array('post_type' => 'product'), admin_url('edit.php'));
 
         if ($dropi_product_id <= 0 || empty($dropi_token)) {
             wp_safe_redirect(
                 add_query_arg(
                     array(
-                        'post_type' => 'product',
                         'dropi_resync' => 'error',
                         'dropi_message' => rawurlencode('El producto no tiene datos de sincronización de Dropi.'),
                     ),
-                    admin_url('edit.php')
+                    $redirect_base
                 )
             );
             exit;
@@ -428,11 +431,10 @@ class JPIODFW_Products
             wp_safe_redirect(
                 add_query_arg(
                     array(
-                        'post_type' => 'product',
                         'dropi_resync' => 'error',
                         'dropi_message' => rawurlencode('No se encontró el token de la tienda para re-sincronizar.'),
                     ),
-                    admin_url('edit.php')
+                    $redirect_base
                 )
             );
             exit;
@@ -444,11 +446,10 @@ class JPIODFW_Products
             wp_safe_redirect(
                 add_query_arg(
                     array(
-                        'post_type' => 'product',
                         'dropi_resync' => 'error',
                         'dropi_message' => rawurlencode('Dropi no devolvió información válida para este producto.'),
                     ),
-                    admin_url('edit.php')
+                    $redirect_base
                 )
             );
             exit;
@@ -495,12 +496,15 @@ class JPIODFW_Products
         );
 
         $redirect_args = array(
-            'post_type' => 'product',
             'dropi_resync' => !empty($result['success']) ? 'success' : 'error',
             'dropi_message' => rawurlencode(!empty($result['success']) ? 'Producto re-sincronizado correctamente.' : (isset($result['message']) ? $result['message'] : 'No fue posible re-sincronizar el producto.')),
         );
 
-        wp_safe_redirect(add_query_arg($redirect_args, admin_url('edit.php')));
+        if ($return_page !== 'synced-prods-dropi') {
+            $redirect_args['post_type'] = 'product';
+        }
+
+        wp_safe_redirect(add_query_arg($redirect_args, $redirect_base));
         exit;
     }
 

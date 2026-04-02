@@ -19,6 +19,10 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 - Opción para sobrescribir imágenes de variaciones existentes en sincronizaciones individuales y masivas.
 - Confirmación explícita antes de sobrescribir imágenes de variaciones ya existentes.
 - Acción `Re-sincronizar Dropi` en la lista de productos de WooCommerce para productos ya importados.
+- Mejoras en la vista `Info Sincronizada`:
+  - Link directo al editor real del producto WooCommerce.
+  - Acción de re-sincronizar desde la misma vista.
+  - Link en `ID Dropi` hacia la lista de productos Dropi filtrada por ese ID.
 
 ### Corregido
 - Importación de imágenes de productos:
@@ -34,6 +38,10 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 - Flujo no AJAX de importación desde la tabla:
   - Se corrigió el paso de la tienda seleccionada.
   - Se corrigió la interpretación del resultado de `import_product()`.
+- Flujo de re-sincronización desde listados administrativos:
+  - La confirmación del re-sync deja explícito que el stock siempre se valida y actualiza, independientemente de la decisión sobre imágenes.
+  - Se corrigió la actualización de `stock_status` en productos variables re-sincronizados desde WooCommerce.
+  - Se corrigió la sincronización de `wc_product_meta_lookup` para que el listado admin refleje correctamente el estado de inventario.
 - Robustez del importador ante respuestas inválidas de Dropi:
   - Ya no se generan fatales cuando Dropi no devuelve un objeto de producto válido.
   - Ahora se responde con errores controlados y mensajes claros para AJAX.
@@ -88,3 +96,4 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 - Se validó que dos re-sincronizaciones consecutivas del producto `652784` no crean nuevos attachments y conservan solo las miniaturas de variación que realmente existen en Dropi.
 - Se validó que una variación con imagen manual en WooCommerce conserva su `_thumbnail_id` cuando la sobrescritura está desactivada.
 - Se validó que la misma variación sí cambia de imagen cuando la sobrescritura está activada explícitamente.
+- Se validó el producto `215731` re-sincronizado desde WooCommerce con estado final `instock` tanto en metas del producto como en `wc_product_meta_lookup`.
