@@ -259,6 +259,80 @@ class JPIODFW_ProductsModel
         return null;
     }
 
+    private function buildVariationSku($product, $variation, $product_id = 0)
+    {
+        $raw_sku = isset($variation->sku) ? trim((string) $variation->sku) : '';
+        $raw_sku = preg_replace('/\s+/', '', $raw_sku);
+        $raw_sku = preg_replace('/[^A-Za-z0-9._-]/', '-', $raw_sku);
+
+        $parent_sku = isset($product->sku) ? trim((string) $product->sku) : '';
+        $parent_sku = preg_replace('/\s+/', '', $parent_sku);
+        $parent_sku = preg_replace('/[^A-Za-z0-9._-]/', '-', $parent_sku);
+
+        $dropi_product_id = isset($product->id) ? absint($product->id) : 0;
+        $dropi_variation_id = isset($variation->id) ? absint($variation->id) : 0;
+
+        $fallback_base = $parent_sku !== '' && strtolower($parent_sku) !== 'null'
+            ? $parent_sku
+            : 'DROPI-' . $dropi_product_id;
+
+        $fallback_sku = $fallback_base . '-DV' . $dropi_variation_id;
+
+        $is_weak_sku = (
+            $raw_sku === ''
+            || strtolower($raw_sku) === 'null'
+            || preg_match('/^-\d+$/', $raw_sku)
+            || preg_match('/^null-\d+$/i', $raw_sku)
+        );
+
+        $candidate_sku = $is_weak_sku ? $fallback_sku : $raw_sku;
+
+        if ($candidate_sku !== '') {
+            $global_sku_post_id = absint($this->get_product_by_sku($candidate_sku));
+            if ($global_sku_post_id > 0) {
+                $global_parent_id = absint(wp_get_post_parent_id($global_sku_post_id));
+
+                if ($global_sku_post_id !== absint($product_id) && $global_parent_id !== absint($product_id)) {
+                    $candidate_sku = $fallback_sku;
+                }
+            }
+        }
+
+        return substr($candidate_sku, 0, 100);
+    }
+
+    private function get_variant_by_dropi_variation_id($product_id, $dropi_variation_id)
+    {
+        $dropi_variation_id = absint($dropi_variation_id);
+        if ($dropi_variation_id <= 0) {
+            return null;
+        }
+
+        $variation_ids = get_posts(
+            array(
+                'post_type' => 'product_variation',
+                'post_parent' => absint($product_id),
+                'numberposts' => -1,
+                'fields' => 'ids',
+                'post_status' => array('publish', 'private', 'draft'),
+            )
+        );
+
+        foreach ($variation_ids as $variation_id) {
+            $stored_dropi_variation_id = absint(get_post_meta($variation_id, '_dropi_variation_id', true));
+            if ($stored_dropi_variation_id === $dropi_variation_id) {
+                return absint($variation_id);
+            }
+
+            $stored_dropi_variation = maybe_unserialize(get_post_meta($variation_id, '_dropi_variation', true));
+            if (is_object($stored_dropi_variation) && isset($stored_dropi_variation->id) && absint($stored_dropi_variation->id) === $dropi_variation_id) {
+                return absint($variation_id);
+            }
+        }
+
+        return null;
+    }
+
     public function getImportedProductByDropiId($dropi_product_id, $token = null)
     {
         $meta_query = array(
@@ -458,6 +532,13 @@ class JPIODFW_ProductsModel
 
                         if (in_array($variation->id, $variationstoimport)) {
                             $varianExisttId = false;
+                            $variation_sku = $this->buildVariationSku($product, $variation, $post_id);
+
+                            $existing_variation_by_dropi_id = $this->get_variant_by_dropi_variation_id($post_id, $variation->id);
+                            if (!empty($existing_variation_by_dropi_id)) {
+                                $varianExisttId = $existing_variation_by_dropi_id;
+                            }
+
                             foreach ($chose_variations as $chose) {
                                 if (isset($chose[$variation->id]) && $chose[$variation->id] != null) {
 
@@ -465,13 +546,18 @@ class JPIODFW_ProductsModel
                                 }
                             }
 
-                            if ($varianExisttId === false && !empty($variation->sku)) {
+                            if ($varianExisttId === false && !empty($variation_sku)) {
+                                $varianExisttId = $this->get_variant_by_sku($post_id, $variation_sku);
+                            }
+
+                            if ($varianExisttId === false && !empty($variation->sku) && $variation->sku !== $variation_sku) {
                                 $varianExisttId = $this->get_variant_by_sku($post_id, $variation->sku);
                             }
 
                             // la variable no xiste la creo
                             $variation_data =  array(
-                                'sku'           => $variation->sku,
+                                'sku'           => $variation_sku,
+                                'source_sku'    => isset($variation->sku) ? $variation->sku : '',
                                 'regular_price' => $variation->suggested_price
                             );
                             //sobreescribir stock
@@ -527,7 +613,7 @@ class JPIODFW_ProductsModel
 
                             $variation_result = $this->create_product_variation($post_id, $variation_data, $variation, $varianExisttId);
                             if (!empty($variation_result)) {
-                                $variation_errors[] = 'Variación ' . (isset($variation->sku) ? $variation->sku : $variation->id) . ': ' . $variation_result;
+                                $variation_errors[] = 'Variación ' . (!empty($variation_sku) ? $variation_sku : (isset($variation->sku) ? $variation->sku : $variation->id)) . ': ' . $variation_result;
                             }
                         }
                     }
@@ -882,6 +968,12 @@ class JPIODFW_ProductsModel
             $variation->set_weight(''); // weight (reseting)
 
             update_post_meta($variation_id,  '_dropi_variation', serialize($dropi_variation));
+            if (isset($dropi_variation->id)) {
+                update_post_meta($variation_id, '_dropi_variation_id', absint($dropi_variation->id));
+            }
+            if (isset($variation_data['source_sku'])) {
+                update_post_meta($variation_id, '_dropi_variation_source_sku', $variation_data['source_sku']);
+            }
 
 
             $this->logger->error('productvariation ' . $variation_id, array('source' => 'dropi-products'));
