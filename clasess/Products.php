@@ -73,6 +73,7 @@ class JPIODFW_Products
 
     function my_load_scripts()
     {
+        global $pagenow;
 
         //  wp_enqueue_script('sweetalert2', 'https://cdn.jsdelivr.net/npm/sweetalert2@11', array());
 
@@ -87,6 +88,11 @@ class JPIODFW_Products
         if ($current_page == 'dropi-products') {
 
             wp_enqueue_script('my_js_products', plugin_dir_url(__DIR__) . 'js/product-events.js', array('jquery'), date('YmdHis'));
+        }
+
+        $current_post_type = isset($_GET['post_type']) ? sanitize_text_field(wp_unslash($_GET['post_type'])) : '';
+        if ($pagenow === 'edit.php' && $current_post_type === 'product') {
+            wp_enqueue_script('dropi-woo-resync-confirm', plugin_dir_url(__DIR__) . 'js/woocommerce-resync-confirm.js', array('jquery', 'dropi-sweetalert2'), date('YmdHis'), true);
         }
 
 
@@ -135,6 +141,7 @@ class JPIODFW_Products
             $productselect = isset($_REQUEST['productselect']) ? $_REQUEST['productselect'] : [];
             $id_store = isset($_REQUEST['store']) ? sanitize_text_field(wp_unslash($_REQUEST['store'])) : '';
             $clean_existing_variations = isset($_REQUEST['clean_existing_variations']) ? wp_unslash($_REQUEST['clean_existing_variations']) : 'false';
+            $overwrite_variation_images = isset($_REQUEST['overwrite_variation_images']) ? wp_unslash($_REQUEST['overwrite_variation_images']) : 'false';
 
             $store = $this->TokenModel->getTokenById(intval($id_store));
 
@@ -168,7 +175,8 @@ class JPIODFW_Products
                 $sob_stock,
                 $store,
                 null,
-                $clean_existing_variations
+                $clean_existing_variations,
+                $overwrite_variation_images
             );
 
 
@@ -231,6 +239,7 @@ class JPIODFW_Products
             $sob_images = isset($_REQUEST['sob_images']) ? wp_unslash($_REQUEST['sob_images']) : 'true';
             $sob_stock = isset($_REQUEST['sob_stock']) ? wp_unslash($_REQUEST['sob_stock']) : 'true';
             $clean_existing_variations = isset($_REQUEST['clean_existing_variations']) ? wp_unslash($_REQUEST['clean_existing_variations']) : 'false';
+            $overwrite_variation_images = isset($_REQUEST['overwrite_variation_images']) ? wp_unslash($_REQUEST['overwrite_variation_images']) : 'false';
             $variationstoimport = array();
             $variations = array();
             $attributes = array();
@@ -281,7 +290,8 @@ class JPIODFW_Products
                 $sob_stock,
                 $store,
                 $dropi_product,
-                $clean_existing_variations
+                $clean_existing_variations,
+                $overwrite_variation_images
             );
 
             $imported_post_id = $existing_product_id;
@@ -367,7 +377,7 @@ class JPIODFW_Products
             'dropi_resync_product_' . absint($post->ID)
         );
 
-        $actions['dropi_resync_product'] = '<a href="' . esc_url($resync_url) . '">' . esc_html__('Re-sincronizar Dropi', 'wc-dropi-integration') . '</a>';
+        $actions['dropi_resync_product'] = '<a href="' . esc_url($resync_url) . '" class="dropi-resync-product-link">' . esc_html__('Re-sincronizar Dropi', 'wc-dropi-integration') . '</a>';
 
         return $actions;
     }
@@ -389,6 +399,7 @@ class JPIODFW_Products
 
         $dropi_product_id = absint(get_post_meta($product_id, '_dropi_product_id', true));
         $dropi_token = get_post_meta($product_id, '_dropi_token', true);
+        $overwrite_variation_images = isset($_GET['overwrite_variation_images']) ? wp_unslash($_GET['overwrite_variation_images']) : 'false';
 
         if ($dropi_product_id <= 0 || empty($dropi_token)) {
             wp_safe_redirect(
@@ -479,7 +490,8 @@ class JPIODFW_Products
             'true',
             $store,
             $dropi_product,
-            'false'
+            'false',
+            $overwrite_variation_images
         );
 
         $redirect_args = array(

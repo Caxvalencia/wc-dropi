@@ -468,12 +468,14 @@ class JPIODFW_ProductsModel
         $sob_stock = null,
         $store = null,
         $dropi_product = null,
-        $clean_existing_variations = 'false'
+        $clean_existing_variations = 'false',
+        $overwrite_variation_images = 'false'
     ) {
         $success = false;
         $message = '';
         $variation_errors = array();
         $created_new_post = false;
+        $overwrite_variation_images_enabled = ($overwrite_variation_images === 'true' || $overwrite_variation_images === true);
 
         try {
             //busco la data del producto en dropi
@@ -577,6 +579,7 @@ class JPIODFW_ProductsModel
                 //SI TIENE VARIABLES AIMPORTAR
                 if ($variationstoimport != null && sizeof($variationstoimport) > 0) {
                     wp_set_object_terms($post_id, 'variable', 'product_type');
+                    $has_in_stock_variation = false;
 
 
                     // The variation data
@@ -632,6 +635,11 @@ class JPIODFW_ProductsModel
                                     $variation_data['stock_qty'] = $finalStockByWarehouse;
                                 }
                             }
+
+                            if (isset($variation_data['stock_qty']) && intval($variation_data['stock_qty']) > 0) {
+                                $has_in_stock_variation = true;
+                            }
+
                             $attributes = [];
                             $attributes2 = [];
                             foreach ($variation->attribute_values as $attr) {
@@ -664,7 +672,7 @@ class JPIODFW_ProductsModel
                             }
 
 
-                            $variation_result = $this->create_product_variation($post_id, $variation_data, $variation, $varianExisttId);
+                            $variation_result = $this->create_product_variation($post_id, $variation_data, $variation, $varianExisttId, $overwrite_variation_images_enabled);
                             if (!empty($variation_result)) {
                                 $variation_errors[] = 'Variación ' . (!empty($variation_sku) ? $variation_sku : (isset($variation->sku) ? $variation->sku : $variation->id)) . ': ' . $variation_result;
                             }
@@ -680,6 +688,47 @@ class JPIODFW_ProductsModel
                             'message' => implode(' | ', $variation_errors),
                         );
                     }
+
+                    if (class_exists('WC_Product_Variable')) {
+                        WC_Product_Variable::sync($post_id);
+                    }
+
+                    $parent_stock_status = $has_in_stock_variation ? 'instock' : 'outofstock';
+                    $parent_product = wc_get_product($post_id);
+
+                    if (is_object($parent_product)) {
+                        if ($parent_stock_status !== 'instock' && method_exists($parent_product, 'get_available_variations')) {
+                            $available_variations = $parent_product->get_available_variations();
+                            $parent_stock_status = !empty($available_variations) ? 'instock' : 'outofstock';
+                        }
+
+                        if ($parent_stock_status !== 'instock') {
+                            foreach ($parent_product->get_children() as $child_variation_id) {
+                                if (get_post_meta($child_variation_id, '_stock_status', true) === 'instock') {
+                                    $parent_stock_status = 'instock';
+                                    break;
+                                }
+                            }
+                        }
+
+                        $parent_product->set_manage_stock(false);
+                        $parent_product->set_stock_quantity(null);
+                        $parent_product->set_stock_status($parent_stock_status);
+                        $parent_product->save();
+                    }
+
+                    update_post_meta($post_id, '_manage_stock', 'no');
+                    delete_post_meta($post_id, '_stock');
+
+                    if (function_exists('wc_update_product_stock_status')) {
+                        wc_update_product_stock_status($post_id, $parent_stock_status);
+                    }
+
+                    update_post_meta($post_id, '_stock_status', $parent_stock_status);
+                    $lookup_ids = array_merge(array($post_id), is_object($parent_product) ? $parent_product->get_children() : array());
+                    $this->syncProductLookupStockData($lookup_ids);
+
+                    wc_delete_product_transients($post_id);
                 } else {
                     wp_set_object_terms($post_id, 'simple', 'product_type');
                 }
@@ -814,6 +863,57 @@ class JPIODFW_ProductsModel
         return ['success' => $success, 'message' => $message];
     }
 
+    private function syncProductLookupStockData($product_ids)
+    {
+        global $wpdb;
+
+        if (empty($product_ids) || !isset($wpdb->wc_product_meta_lookup)) {
+            return;
+        }
+
+        foreach (array_unique(array_map('absint', $product_ids)) as $product_id) {
+            if ($product_id <= 0) {
+                continue;
+            }
+
+            $manage_stock = get_post_meta($product_id, '_manage_stock', true);
+            $stock_status = get_post_meta($product_id, '_stock_status', true);
+            $stock_quantity = ($manage_stock === 'yes') ? get_post_meta($product_id, '_stock', true) : null;
+
+            $updated = $wpdb->update(
+                $wpdb->wc_product_meta_lookup,
+                array(
+                    'stock_status' => $stock_status !== '' ? $stock_status : 'outofstock',
+                    'stock_quantity' => ($stock_quantity === '' || $stock_quantity === null) ? null : wc_stock_amount($stock_quantity),
+                ),
+                array(
+                    'product_id' => $product_id,
+                ),
+                array(
+                    '%s',
+                    '%f',
+                ),
+                array('%d')
+            );
+
+            if ($updated === false || $updated === 0) {
+                $wpdb->insert(
+                    $wpdb->wc_product_meta_lookup,
+                    array(
+                        'product_id' => $product_id,
+                        'stock_status' => $stock_status !== '' ? $stock_status : 'outofstock',
+                        'stock_quantity' => ($stock_quantity === '' || $stock_quantity === null) ? null : wc_stock_amount($stock_quantity),
+                    ),
+                    array(
+                        '%d',
+                        '%s',
+                        '%f',
+                    )
+                );
+            }
+        }
+    }
+
 
     private function create_product_attributes($product_id, $attributes)
     {
@@ -887,7 +987,7 @@ class JPIODFW_ProductsModel
      * @param array $variation_data | The data to insert in the product.
      */
 
-    private function create_product_variation($product_id, $variation_data, $dropi_variation, $varianExisttId)
+    private function create_product_variation($product_id, $variation_data, $dropi_variation, $varianExisttId, $overwrite_variation_images = false)
     {
         $create = false;
         $message = '';
@@ -944,6 +1044,8 @@ class JPIODFW_ProductsModel
             }
 
             $variation =  new WC_Product_Variation($variation_id);
+            $current_variation_image_id = absint(get_post_meta($variation_id, '_thumbnail_id', true));
+            $should_sync_variation_image = ($create === true || $overwrite_variation_images === true || $current_variation_image_id <= 0);
 
             // aqui lo que hago es setar el sku a la variable bien sea nueva o bien sea que exista, pero woocomerce no permite crear variables con el mismo sku asi que explotaria 
 
@@ -1013,13 +1115,13 @@ class JPIODFW_ProductsModel
                 $variation->set_stock_quantity(null);
             }
 
-            if (!empty($variation_data['image'])) {
+            if ($should_sync_variation_image && !empty($variation_data['image'])) {
                 $variation_image_id = $this->importDropiImageAttachment($variation_id, $variation_data['image']);
                 if (!empty($variation_image_id)) {
                     $variation->set_image_id($variation_image_id);
                     update_post_meta($variation_id, '_thumbnail_id', $variation_image_id);
                 }
-            } elseif (array_key_exists('image', $variation_data)) {
+            } elseif ($should_sync_variation_image && array_key_exists('image', $variation_data)) {
                 $variation->set_image_id(0);
                 delete_post_meta($variation_id, '_thumbnail_id');
             }

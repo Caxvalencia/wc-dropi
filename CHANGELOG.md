@@ -16,6 +16,8 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 - Resumen visual al final de la modal con los IDs que no pudieron importarse.
 - Columna `Precio Proveedor` en la lista de productos de WooCommerce para productos sincronizados con Dropi.
 - Opción para limpiar variaciones existentes al sincronizar un producto variable ya vinculado, tanto en importación individual como en importación masiva.
+- Opción para sobrescribir imágenes de variaciones existentes en sincronizaciones individuales y masivas.
+- Confirmación explícita antes de sobrescribir imágenes de variaciones ya existentes.
 - Acción `Re-sincronizar Dropi` en la lista de productos de WooCommerce para productos ya importados.
 
 ### Corregido
@@ -44,6 +46,8 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
   - Se corrigió la asignación de imagen a cada variación.
   - Las variaciones ya no reciben automáticamente la imagen principal del producto cuando Dropi no trae una imagen específica para esa variación.
   - Si una variación no tiene foto propia en Dropi, se limpia `_thumbnail_id` para evitar duplicados visuales y media redundante.
+  - Las miniaturas editadas manualmente en variaciones de WooCommerce ya no se sobrescriben por defecto durante la sincronización.
+  - La sobrescritura de imágenes de variaciones ahora solo ocurre si el usuario la solicita expresamente.
   - Se dejó de perder la información de `warehouse_product_variation` al guardar `_dropi_variation`.
   - Se corrigieron casos donde el nombre del atributo de variación llegaba en una estructura distinta.
   - Se evitó el uso de un `variation_id` indefinido en ciertos flujos de sincronización.
@@ -82,3 +86,5 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 - Se validó la sincronización final de stock e imagen para variaciones ya existentes.
 - Se validó que dos re-sincronizaciones consecutivas del producto `2097766` no crean nuevos attachments y que sus variaciones no duplican la imagen principal.
 - Se validó que dos re-sincronizaciones consecutivas del producto `652784` no crean nuevos attachments y conservan solo las miniaturas de variación que realmente existen en Dropi.
+- Se validó que una variación con imagen manual en WooCommerce conserva su `_thumbnail_id` cuando la sobrescritura está desactivada.
+- Se validó que la misma variación sí cambia de imagen cuando la sobrescritura está activada explícitamente.

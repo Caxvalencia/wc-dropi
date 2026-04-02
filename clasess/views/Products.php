@@ -189,6 +189,18 @@ class JPIODFW_ProductsView
                                             <p class="text-gray-500">Si desmarca esta opción, las imagenes del producto no se guardarán. </p>
                                         </div>
                                     </div>
+
+                                    <div class="col-md-12 flex items-start" id="row-overwrite-variation-images" style="display:none;">
+                                        <div class="flex items-center h-5">
+                                            <input id="overwrite-variation-images" name="overwrite-variation-images" value="1" type="checkbox" class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded">
+                                        </div>
+                                        
+                                        <div class="ml-3 text-sm">
+                                            <label for="overwrite-variation-images" class="font-medium text-gray-700"><strong>Sobrescribir</strong> imagenes de variaciones existentes</label>
+                                            <p class="text-gray-500">Solo aplica al vincular o sincronizar un producto existente. Si no se activa, las miniaturas ya editadas manualmente en variaciones de WooCommerce se conservarán.</p>
+                                        </div>
+                                    </div>
+
                                     <div class="col-md-12 flex items-start">
                                         <div class="flex items-center h-5">
                                             <input id="sob-stock" checked name="sob-stock" value="1" type="checkbox" class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded">
@@ -244,6 +256,7 @@ class JPIODFW_ProductsView
                                     </div>
                                     <div class="col-md-6">
                                         <label class="d-block"><input id="bulk-sob-images" type="checkbox" checked> Guardar imagenes</label>
+                                        <label class="d-block"><input id="bulk-overwrite-variation-images" type="checkbox"> Sobrescribir imagenes de variaciones existentes</label>
                                         <label class="d-block"><input id="bulk-sob-stock" type="checkbox" checked> Guardar stock</label>
                                         <label class="d-block"><input id="bulk-clean-variations" type="checkbox"> Limpiar variaciones existentes al sincronizar</label>
                                     </div>

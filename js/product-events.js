@@ -57,6 +57,9 @@ jQuery(document).ready(function ($) {
             jQuery('#row-precio').hide();
         }
     });
+    $sobimages.change(function () {
+        JPIODFW_toggleOverwriteVariationImagesOption();
+    });
 
     $sobprecio.change(function () {
         if (this.checked) {
@@ -78,6 +81,7 @@ jQuery(document).ready(function ($) {
             $("#row-nombre").hide();
             $("#row-descripcion").hide();
             $("#row-precio").hide();
+            JPIODFW_toggleOverwriteVariationImagesOption();
             
             jQuery('select[name=chose-variations]').each(function () {
                 //this wrapped in jQuery will give us the current .letter-q div
@@ -87,13 +91,22 @@ jQuery(document).ready(function ($) {
         } else {
             jQuery('#row-products-select').hide();
             jQuery('#row-clean-variations').hide();
+            jQuery('#row-overwrite-variation-images').hide();
             jQuery('#clean-variations').prop('checked', false);
+            jQuery('#overwrite-variation-images').prop('checked', false);
             jQuery('select[name=chose-variations]').each(function () {
                 //this wrapped in jQuery will give us the current .letter-q div
                 jQuery(this).hide();
             });
         }
     });
+
+    jQuery("#bulk-sob-images").change(function () {
+        if (!this.checked) {
+            jQuery("#bulk-overwrite-variation-images").prop('checked', false);
+        }
+    });
+
     $selectAll.change(function () {
         if (this.checked) {
             jQuery('input[type=checkbox][name=variations]').prop('checked', true);
@@ -180,7 +193,9 @@ jQuery(document).ready(function ($) {
         $("#products-select").val('');
         jQuery('#row-products-select').hide();
         jQuery('#row-clean-variations').hide();
+        jQuery('#row-overwrite-variation-images').hide();
         jQuery('#clean-variations').prop('checked', false);
+        jQuery('#overwrite-variation-images').prop('checked', false);
         jQuery("#new-product").prop("checked", true);
 
 
@@ -280,8 +295,14 @@ jQuery(document).ready(function ($) {
             sob_precio: $("#bulk-sob-precio").is(':checked'),
             sob_images: $("#bulk-sob-images").is(':checked'),
             sob_stock: $("#bulk-sob-stock").is(':checked'),
-            clean_existing_variations: $("#bulk-clean-variations").is(':checked')
+            clean_existing_variations: $("#bulk-clean-variations").is(':checked'),
+            overwrite_variation_images: $("#bulk-overwrite-variation-images").is(':checked')
         };
+
+        if (!(await JPIODFW_confirmVariationImageOverwrite(options.overwrite_variation_images))) {
+            $("#bulk-import-submit").prop('disabled', false);
+            return;
+        }
 
         let successCount = 0;
         let errorCount = 0;
@@ -376,7 +397,7 @@ function JPIODFW_getProducts() {
 
 
 /**funcion que procesa el fomrulario modal */
-function JPIODFW_proces_form() {
+async function JPIODFW_proces_form() {
     chose_variations = [];
     let product_name = jQuery("#product-name").val();
     let product_description = jQuery("#product-description").val();
@@ -390,7 +411,12 @@ function JPIODFW_proces_form() {
     let sob_images = jQuery("#sob-images").is(':checked');
     let sob_stock = jQuery("#sob-stock").is(':checked');
     let clean_existing_variations = jQuery("#clean-variations").is(':checked');
+    let overwrite_variation_images = jQuery("#overwrite-variation-images").is(':checked');
     let store =  jQuery("#store").val();
+
+    if (!(await JPIODFW_confirmVariationImageOverwrite(overwrite_variation_images))) {
+        return;
+    }
 
     let variationstoimport = jQuery.map(jQuery('input[type=checkbox][name=variations]:checked'), function (c) {
         return c.value;
@@ -413,7 +439,7 @@ function JPIODFW_proces_form() {
     let productselect = jQuery("#products-select").val();
 
     JPIODFW_import(product_url, product_name, product_description, product_price,
-        sob_nombre, sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store, clean_existing_variations);
+        sob_nombre, sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store, clean_existing_variations, overwrite_variation_images);
 }
 
 function JPIODFW_showAlert(title, text, incon, confirmButtonText) {
@@ -424,6 +450,37 @@ function JPIODFW_showAlert(title, text, incon, confirmButtonText) {
         confirmButtonText: confirmButtonText,
         allowOutsideClick: false
     })
+}
+
+function JPIODFW_toggleOverwriteVariationImagesOption() {
+    let isSync = jQuery('input[type=radio][name=product-action]:checked').val() === 'SYNC';
+    let saveImages = jQuery("#sob-images").is(':checked');
+
+    if (isSync && saveImages) {
+        jQuery('#row-overwrite-variation-images').show();
+        return;
+    }
+
+    jQuery('#row-overwrite-variation-images').hide();
+    jQuery('#overwrite-variation-images').prop('checked', false);
+}
+
+async function JPIODFW_confirmVariationImageOverwrite(shouldOverwrite) {
+    if (shouldOverwrite !== true) {
+        return true;
+    }
+
+    let result = await Swal.fire({
+        title: 'Sobrescribir imagenes de variaciones',
+        text: 'Esto reemplazará las imagenes actuales de las variaciones existentes con las imagenes que devuelva Dropi. ¿Deseas continuar?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Si, sobrescribir',
+        cancelButtonText: 'Cancelar',
+        allowOutsideClick: false
+    });
+
+    return result.isConfirmed === true;
 }
 
 function JPIODFW_parseBulkProductIds(rawValue) {
@@ -486,7 +543,8 @@ function JPIODFW_importByProductId(productId, store, options) {
                 sob_precio: options.sob_precio,
                 sob_images: options.sob_images,
                 sob_stock: options.sob_stock,
-                clean_existing_variations: options.clean_existing_variations
+                clean_existing_variations: options.clean_existing_variations,
+                overwrite_variation_images: options.overwrite_variation_images
             },
             success: function (response) {
                 resolve(response);
@@ -500,7 +558,7 @@ function JPIODFW_importByProductId(productId, store, options) {
 
 
 function JPIODFW_import(product_url, product_name, product_description, product_price, sob_nombre,
-    sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store, clean_existing_variations) {
+    sob_descripcion, sob_precio, sob_images, variationstoimport, productaction, productselect, chose_variations, sob_stock, store, clean_existing_variations, overwrite_variation_images) {
 
     let data = {};
     if (product_name != undefined) {
@@ -519,6 +577,7 @@ function JPIODFW_import(product_url, product_name, product_description, product_
         data.attributes = attributes;
         data.store = store;
         data.clean_existing_variations = clean_existing_variations;
+        data.overwrite_variation_images = overwrite_variation_images;
 
     }
 
