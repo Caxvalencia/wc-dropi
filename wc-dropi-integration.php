@@ -3,8 +3,8 @@
 /**
  * Plugin Name: Dropify
  * Description: This plugin allow users to show and import products from dropi on woocomerce
- * Version: 4.7.2
- * Author: Jhainey Perez
+ * Version: 4.7.3
+ * Author: Jhainey Perez, caxvalencia
  * Text Domain: wc-dropi-integration
  */
 

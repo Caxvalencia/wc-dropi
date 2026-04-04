@@ -2,7 +2,7 @@
 
 Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 
-## [4.7.2] - 2026-04-01
+## [4.7.3] - 2026-04-02
 
 ### Agregado
 - Documento [DROPI-CO-API-CURL.md](/Users/cax/Desktop/projects/wc-dropi-integration/DROPI-CO-API-CURL.md) con ejemplos `curl` para los endpoints de Dropi CO detectados en el plugin.
@@ -25,6 +25,10 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
   - Link en `ID Dropi` hacia la lista de productos Dropi filtrada por ese ID.
 
 ### Corregido
+- Selector de ciudad para checkout:
+  - Se agregó soporte para el checkout por bloques de WooCommerce, donde el campo `City` antes seguía como texto libre.
+  - El selector de ciudad ahora también responde a cambios de país/departamento en la UI de Blocks y mantiene sincronizado el valor real del input usado por WooCommerce.
+  - Se corrigió un bucle de repintado del selector en Blocks filtrando mutaciones generadas por el propio plugin y evitando reconstrucciones innecesarias del `select`.
 - Importación de imágenes de productos:
   - Se reemplazó la descarga directa con `file_get_contents()` por sideload usando APIs de WordPress/WooCommerce.
   - Se normalizaron URLs de imágenes para evitar archivos vacíos o rutas inválidas.
@@ -86,6 +90,8 @@ Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 
 ### Validado
 - Se levantó y configuró el stack local con WordPress, WooCommerce y el plugin activo.
+- Se validó manualmente en `checkout` con bloques que el campo `City` aparece como lista para Colombia y cambia correctamente al modificar el departamento.
+- Se validó que el selector de ciudad en Blocks ya no entra en bucle visual de reapertura/repintado.
 - Se probaron importaciones reales por AJAX contra varios `product id` que previamente fallaban.
 - Se verificó que el flujo masivo ya no cae con `Internal Server Error` cuando Dropi rate-limita o devuelve respuesta inválida.
 - Se verificó la limpieza de un producto variable con historial de duplicados, pasando de 12 variaciones a 4 variaciones correctas.
