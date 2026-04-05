@@ -2,6 +2,23 @@
 
 Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 
+## [4.7.4] - 2026-04-05
+
+### Corregido
+- Sincronización de órdenes hacia Dropi:
+  - Se corrigió el cálculo de stock para productos variables al construir el payload de la orden, tomando el stock real de `warehouse_product_variation` en vez del stock del padre.
+  - Se corrigió el envío de pedidos mixtos con productos de distintos proveedores, generando un `shop_order_id` único por grupo/proveedor para evitar rechazos por orden duplicada en Dropi.
+  - Se agregó protección para no reenviar órdenes ya sincronizadas cuando el pedido ya tiene `_dropi_order_id` y `_is_dropi_order = Yes`.
+  - Se mejoró el manejo de reintentos parciales, conservando los IDs Dropi ya creados por proveedor y evitando reenvíos innecesarios de grupos ya procesados.
+  - Se endureció el parsing de la respuesta de Dropi para extraer correctamente IDs de orden y para usar el detalle real del error cuando el API responde con `message` genérico.
+  - Se agregó reconstrucción automática del `variation_id` de Dropi cuando una variación WooCommerce tiene metadatos legacy dañados, usando el producto padre, el SKU y los atributos de la variación.
+  - Se empezó a guardar el mapa `_dropi_order_group_map` por proveedor para mejorar la trazabilidad de órdenes partidas en varios grupos.
+
+### Validado
+- Se validó la orden mixta `1147`, quedando sincronizada correctamente en Dropi con múltiples IDs de orden guardados localmente.
+- Se validó que una segunda ejecución sobre una orden ya sincronizada no vuelve a reenviarla a Dropi.
+- Se validó la reconstrucción del `variation_id` de la variación `557` del producto `652784` durante la creación de la orden.
+
 ## [4.7.3] - 2026-04-02
 
 ### Agregado

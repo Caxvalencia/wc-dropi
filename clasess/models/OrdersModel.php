@@ -37,6 +37,232 @@ class JPIODFW_OrdersModel
         return self::$instance;
     }
 
+    private function decodeDropiMeta($raw_value)
+    {
+        if (empty($raw_value)) {
+            return null;
+        }
+
+        $decoded = maybe_unserialize($raw_value);
+
+        if (is_object($decoded) || is_array($decoded)) {
+            return $decoded;
+        }
+
+        if (is_string($raw_value)) {
+            $json = json_decode($raw_value);
+
+            if (is_object($json) || is_array($json)) {
+                return $json;
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeDropiValue($value)
+    {
+        if (is_array($value) || is_object($value)) {
+            return '';
+        }
+
+        $value = wp_strip_all_tags((string) $value);
+        $value = remove_accents($value);
+        $value = strtoupper(trim($value));
+
+        return $value;
+    }
+
+    private function findDropiVariationFromProduct($dropi_product, $variation_id)
+    {
+        if (empty($variation_id) || empty($dropi_product)) {
+            return null;
+        }
+
+        if (is_array($dropi_product)) {
+            $dropi_product = (object) $dropi_product;
+        }
+
+        if (!is_object($dropi_product) || empty($dropi_product->variations) || !is_array($dropi_product->variations)) {
+            return null;
+        }
+
+        $stored_dropi_variation_id = absint(get_post_meta($variation_id, '_dropi_variation_id', true));
+        $variation_sku = $this->normalizeDropiValue(get_post_meta($variation_id, '_sku', true));
+        $variation_product = wc_get_product($variation_id);
+        $variation_attributes = array();
+
+        if ($variation_product && is_a($variation_product, 'WC_Product_Variation')) {
+            foreach ($variation_product->get_variation_attributes() as $attribute_value) {
+                $normalized_value = $this->normalizeDropiValue($attribute_value);
+                
+                if ($normalized_value !== '') {
+                    $variation_attributes[] = $normalized_value;
+                }
+            }
+        }
+
+        sort($variation_attributes);
+
+        foreach ($dropi_product->variations as $candidate_variation) {
+            if (is_array($candidate_variation)) {
+                $candidate_variation = (object) $candidate_variation;
+            }
+
+            if (!is_object($candidate_variation)) {
+                continue;
+            }
+
+            if ($stored_dropi_variation_id > 0 && isset($candidate_variation->id) && absint($candidate_variation->id) === $stored_dropi_variation_id) {
+                return $candidate_variation;
+            }
+
+            $candidate_sku = isset($candidate_variation->sku) ? $this->normalizeDropiValue($candidate_variation->sku) : '';
+            
+            if (!empty($variation_sku) && !empty($candidate_sku) && $variation_sku === $candidate_sku) {
+                return $candidate_variation;
+            }
+
+            if (!empty($variation_attributes) && isset($candidate_variation->attribute_values) && is_array($candidate_variation->attribute_values)) {
+                $candidate_attributes = array();
+
+                foreach ($candidate_variation->attribute_values as $attribute_value) {
+                    if (is_object($attribute_value) && isset($attribute_value->value)) {
+                        $normalized_value = $this->normalizeDropiValue($attribute_value->value);
+                    } elseif (is_array($attribute_value) && isset($attribute_value['value'])) {
+                        $normalized_value = $this->normalizeDropiValue($attribute_value['value']);
+                    } else {
+                        $normalized_value = '';
+                    }
+
+                    if ($normalized_value !== '') {
+                        $candidate_attributes[] = $normalized_value;
+                    }
+                }
+
+                sort($candidate_attributes);
+
+                if (!empty($candidate_attributes) && $candidate_attributes === $variation_attributes) {
+                    return $candidate_variation;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function getDropiVariationStock($dropi_variation)
+    {
+        if (empty($dropi_variation) || (!is_object($dropi_variation) && !is_array($dropi_variation))) {
+            return null;
+        }
+
+        $variation = is_array($dropi_variation) ? (object) $dropi_variation : $dropi_variation;
+        $stock = 0;
+        $found_stock = false;
+
+        if (isset($variation->warehouse_product_variation) && is_array($variation->warehouse_product_variation)) {
+            foreach ($variation->warehouse_product_variation as $warehouse_stock) {
+                if (is_array($warehouse_stock) && isset($warehouse_stock['stock'])) {
+                    $stock += intval($warehouse_stock['stock']);
+                    $found_stock = true;
+                } elseif (is_object($warehouse_stock) && isset($warehouse_stock->stock)) {
+                    $stock += intval($warehouse_stock->stock);
+                    $found_stock = true;
+                }
+            }
+        }
+
+        if ($found_stock) {
+            return max(0, $stock);
+        }
+
+        if (isset($variation->stock)) {
+            return max(0, intval($variation->stock));
+        }
+
+        return null;
+    }
+
+    private function getDropiGroupOrderId($order_id, $supplier_id, $group_count)
+    {
+        $base_order_id = (string) absint($order_id);
+
+        if ($group_count > 1 && !empty($supplier_id)) {
+            return $base_order_id . '-' . absint($supplier_id);
+        }
+
+        return $base_order_id;
+    }
+
+    private function extractDropiOrderId($response_body)
+    {
+        if (!is_array($response_body)) {
+            return '';
+        }
+
+        if (isset($response_body['objects'])) {
+            $objects = $response_body['objects'];
+
+            if (is_object($objects) && isset($objects->id)) {
+                return (string) $objects->id;
+            }
+
+            if (is_array($objects)) {
+                if (isset($objects['id'])) {
+                    return (string) $objects['id'];
+                }
+
+                if (isset($objects[0])) {
+                    $first_object = $objects[0];
+                    if (is_object($first_object) && isset($first_object->id)) {
+                        return (string) $first_object->id;
+                    }
+                    if (is_array($first_object) && isset($first_object['id'])) {
+                        return (string) $first_object['id'];
+                    }
+                }
+            }
+        }
+
+        if (isset($response_body['object'])) {
+            $object = $response_body['object'];
+
+            if (is_object($object) && isset($object->id)) {
+                return (string) $object->id;
+            }
+
+            if (is_array($object) && isset($object['id'])) {
+                return (string) $object['id'];
+            }
+        }
+
+        return '';
+    }
+
+    private function getStoredDropiOrderGroupMap($order)
+    {
+        $raw_map = $order->get_meta('_dropi_order_group_map', true);
+
+        if (is_array($raw_map)) {
+            return $raw_map;
+        }
+
+        if (is_string($raw_map) && $raw_map !== '') {
+            $decoded_map = json_decode($raw_map, true);
+            if (is_array($decoded_map)) {
+                return $decoded_map;
+            }
+
+            $unserialized_map = maybe_unserialize($raw_map);
+            if (is_array($unserialized_map)) {
+                return $unserialized_map;
+            }
+        }
+
+        return array();
+    }
+
     private function makeProductsArray($order)
     {
         $create_product_if_not_exist = sanitize_text_field(get_option('dropi-woocomerce-create_product_if_no_exist'));
@@ -105,13 +331,7 @@ class JPIODFW_OrdersModel
 
 
             if (!empty($dropi_product)) {
-                $unserialized = unserialize($dropi_product);
-
-                if (empty($unserialized) || $unserialized == false) {
-
-                    $unserialized = json_decode($dropi_product);
-                }
-                $dropi_product = $unserialized;
+                $dropi_product = $this->decodeDropiMeta($dropi_product);
             }
 
             if ((!empty($dropi_product) && (is_object($dropi_product) || is_array($dropi_product))) || $create_product_if_not_exist === '1') {
@@ -152,13 +372,7 @@ class JPIODFW_OrdersModel
                 $token_product = $this->tokenModel->getTokens()[0]->token; // here I have to bring a token to create the product in Dropi... how to know if its supplier and i can create product?
             } else {
 
-                $unserialized = unserialize($dropi_product);
-
-                if (empty($unserialized) || $unserialized == false) {
-
-                    $unserialized = json_decode($dropi_product);
-                }
-                $dropi_product = $unserialized;
+                $dropi_product = $this->decodeDropiMeta($dropi_product);
             }
 
             if (!empty($variation_id)) {
@@ -171,41 +385,53 @@ class JPIODFW_OrdersModel
                 $subtotalpreciolinea = $amountToAdd;
                 $item_total = $item_total + $subtotalpreciolinea;
 
+                $dropi_variation = null;
+                if (!empty($variation_id)) {
+                    $dropi_variation = $this->decodeDropiMeta(get_post_meta($variation_id, '_dropi_variation', true));
+                    
+                    if (empty($dropi_variation) && !empty($dropi_product) && isset($dropi_product->type) && $dropi_product->type == 'VARIABLE') {
+                        $dropi_variation = $this->findDropiVariationFromProduct($dropi_product, $variation_id);
+
+                        if (!empty($dropi_variation)) {
+                            update_post_meta($variation_id, '_dropi_variation', serialize($dropi_variation));
+                            
+                            if (isset($dropi_variation->id)) {
+                                update_post_meta($variation_id, '_dropi_variation_id', absint($dropi_variation->id));
+                            }
+                        }
+                    }
+                }
+
                 $dropi_product->name = $item_name;
                 $dropi_product->quantity = intval($quantity);
-                $dropi_product->stock = intval($dropi_product->stock);
+                $dropi_product->stock = isset($dropi_product->stock) ? intval($dropi_product->stock) : 0;
                 $dropi_product->price = floatval($item_total / $quantity);
                 $dropi_product->token = $token_product;
 
-                $total = $total + ($dropi_product->price * $dropi_product->quantity);
+                if (
+                    isset($dropi_product->type) &&
+                    $dropi_product->type == 'VARIABLE' &&
+                    !empty($dropi_variation) &&
+                    (is_object($dropi_variation) || is_array($dropi_variation))
+                ) {
+                    $variation_stock = $this->getDropiVariationStock($dropi_variation);
 
-                $dropi_variation = get_post_meta($variation_id, '_dropi_variation', true);
-                $logger->info('1 - variacion: ' . $variation_id . " " . $dropi_product->name, array('source' => 'dropi-orders'));
-                $logger->info($dropi_variation, array('source' => 'dropi-orders'));
-
-
-                // Registrar la cadena serializada
-                $logger->info("Serialized data: " . var_export($dropi_variation, true), array('source' => 'dropi-orders'));
-
-                try {
-                    // Intentar deserializar la cadena
-                    $dropi_variation = unserialize($dropi_variation);
-
-                    // Verificar si la deserialización fue exitosa
-                    if ($dropi_variation === false) {
-                        throw new Exception('Failed to unserialize data');
+                    if ($variation_stock !== null) {
+                        $dropi_product->stock = $variation_stock;
                     }
-                    // Imprimir el objeto deserializado
-                    //$logger->info(print_r($dropi_variation, true), array('source' => 'dropi-orders'));
-                } catch (Exception $e) {
-                    $logger->error("Error during unserialization: " . $e->getMessage(), array('source' => 'dropi-orders'));
+
+                    if (isset($dropi_variation->id)) {
+                        $dropi_product->variation_id = $dropi_variation->id;
+                    }
                 }
 
-                // $dropi_variation = json_decode($dropi_variation); 
+                $total = $total + ($dropi_product->price * $dropi_product->quantity);
+
+                $logger->info('1 - variacion: ' . $variation_id . " " . $dropi_product->name, array('source' => 'dropi-orders'));
+                $logger->info(print_r($dropi_variation, true), array('source' => 'dropi-orders'));
+                $logger->info("Serialized data: " . var_export($dropi_variation, true), array('source' => 'dropi-orders'));
 
                 if ($dropi_product->type == 'VARIABLE' && !empty($dropi_variation) && (is_object($dropi_variation) || is_array($dropi_variation))) {
-
-
                     $dropi_product->variation_id = $dropi_variation->id;
                 }
 
@@ -246,26 +472,39 @@ class JPIODFW_OrdersModel
     {
         $result = false;
         try {
+            $existing_dropi_order_id = trim((string) $order->get_meta('_dropi_order_id', true));
+            $existing_dropi_status = trim((string) $order->get_meta('_is_dropi_order', true));
+            $existing_group_map = $this->getStoredDropiOrderGroupMap($order);
+            $existing_dropi_order_ids = array_values(array_filter(array_map('trim', explode(',', $existing_dropi_order_id))));
+            $consumed_existing_dropi_order_ids = array();
+
+            if (!empty($existing_dropi_order_id) && $existing_dropi_status === 'Yes') {
+                return true;
+            }
+
             $makeProductsArray = $this->makeProductsArray($order);
 
             //solo si tengo productos que sean de dropi
             if (sizeof($makeProductsArray['products']) > 0) {
                 $listProducts = $makeProductsArray['products'];
-                $tempToken = $listProducts[0]->token;
-                $is_multitoken = false;
-                $id_token = '';
+                $grouped_products = array();
 
-                foreach ($listProducts as $item_key => $item) {
-                    if ($item->token == $tempToken) {
-                        $tempToken = $item->token;
-                    } else {
-                        $tempToken = '';
-                        $is_multitoken = true;
-                        break;
+                foreach ($listProducts as $item) {
+                    $item_token = isset($item->token) ? $item->token : '';
+                    $supplier_id = isset($item->user_id) ? absint($item->user_id) : 0;
+                    $group_key = md5($item_token . '|' . $supplier_id);
+
+                    if (!isset($grouped_products[$group_key])) {
+                        $grouped_products[$group_key] = array(
+                            'token' => $item_token,
+                            'supplier_id' => $supplier_id,
+                            'products' => array(),
+                            'total' => 0,
+                        );
                     }
-                }
-                if ($is_multitoken == false) {
-                    $id_token = $listProducts[0]->token;
+
+                    $grouped_products[$group_key]['products'][] = $item;
+                    $grouped_products[$group_key]['total'] += (floatval(isset($item->price) ? $item->price : 0) * intval(isset($item->quantity) ? $item->quantity : 0));
                 }
 
                 $order_data = $order->get_data(); // The Order data
@@ -323,75 +562,139 @@ class JPIODFW_OrdersModel
                 }
 
                 $logger->info(wc_print_r('Creating dropi order ' . $order->get_id(), true), array('source' => 'dropi-orders'));
+                $logger->info(print_r($grouped_products, true), array('source' => 'dropi-orders'));
 
-                $logger->info(print_r($data, true));
-                $args = array(
-                    'body' => json_encode($data),
-                    'timeout' => '100000',
-                    'redirection' => '5',
-                    'httpversion' => '1.0',
-                    'method' => 'POST',
-                    'blocking' => true,
-                    'headers' => array(
-                        'Content-Type' => 'application/json;charset=UTF-8',
-                        'dropi-integration-key' =>  $id_token,
+                $created_dropi_orders = array();
+                $group_errors = array();
+                $group_count = count($grouped_products);
 
-                    ),
-                    'cookies' => array(),
-                    'sslverify' => false,
+                foreach ($grouped_products as $group_key => $group) {
+                    $id_token = $group['token'];
+                    $supplier_id = $group['supplier_id'];
 
-                );
+                    if (!empty($supplier_id) && !empty($existing_group_map[$supplier_id])) {
+                        $created_dropi_orders[] = $existing_group_map[$supplier_id];
+                        continue;
+                    }
 
-                $response = wp_remote_post(
-                    $endpoint,
-                    $args
-                );
+                    if (empty($id_token) || empty($supplier_id)) {
+                        $group_errors[] = 'No se encontro token o supplier_id valido para uno de los grupos del pedido.';
+                        continue;
+                    }
 
-                //$logger->error(wc_print_r($response, true), array('source' => 'dropi-orders'));
-                if (is_wp_error($response)) {
-                    $error_message = $response->get_error_message();
-                    $order->update_meta_data('_is_dropi_order', __('Dropi sync error: ' . $error_message, 'wc-dropi-integration'));
-                    $logger->error(wc_print_r('Error creating dropi order - wp_error ' . $order->get_id(), true), array('source' => 'dropi-orders'));
-                    $logger->error(wc_print_r($error_message, true), array('source' => 'dropi-orders'));
-                } else {
+                    $data['total_order'] = $group['total'];
+                    $data['products'] = $group['products'];
+                    $data['supplier_id'] = $supplier_id;
+                    $data['shop_order_id'] = $this->getDropiGroupOrderId($order->get_id(), $supplier_id, $group_count);
+
+                    $logger->info(print_r($data, true), array('source' => 'dropi-orders'));
+                    $args = array(
+                        'body' => json_encode($data),
+                        'timeout' => '100000',
+                        'redirection' => '5',
+                        'httpversion' => '1.0',
+                        'method' => 'POST',
+                        'blocking' => true,
+                        'headers' => array(
+                            'Content-Type' => 'application/json;charset=UTF-8',
+                            'dropi-integration-key' =>  $id_token,
+
+                        ),
+                        'cookies' => array(),
+                        'sslverify' => false,
+
+                    );
+
+                    $response = wp_remote_post(
+                        $endpoint,
+                        $args
+                    );
+
+                    if (is_wp_error($response)) {
+                        $error_message = $response->get_error_message();
+                        $group_errors[] = $error_message;
+                        $logger->error(wc_print_r('Error creating dropi order - wp_error ' . $order->get_id(), true), array('source' => 'dropi-orders'));
+                        $logger->error(wc_print_r($error_message, true), array('source' => 'dropi-orders'));
+                        continue;
+                    }
+
                     $response_body = (array) json_decode($response['body']);
+                    $logger->info('Dropi response for group ' . $data['shop_order_id'], array('source' => 'dropi-orders'));
+                    $logger->info(print_r($response_body, true), array('source' => 'dropi-orders'));
 
-                    //
-                    //var_dump($response_body);
-                    if ($response_body['isSuccess'] == false) {
-
-                        $message = $response_body['message'];
-                        if (empty($message)) {
+                    if (!isset($response_body['isSuccess']) || $response_body['isSuccess'] == false) {
+                        $message = isset($response_body['message']) ? $response_body['message'] : '';
+                        $error_detail = isset($response_body['error']) ? $response_body['error'] : '';
+                        if (empty($message) && isset($response_body['status'])) {
                             $message = $response_body['status'];
                         }
+                        if (empty($message) && !empty($error_detail)) {
+                            $message = $error_detail;
+                        }
 
+                        if (!empty($error_detail) && stripos($message, 'Error al crear la orden') !== false) {
+                            $message = $error_detail;
+                        }
 
-                        $result = __('Error creating order, ' . $message);
-                        // $this->helper->showAdminNotice(__('Error creating order, show woocomerce logs for more info.', 'wc-dropi-integration') . ' ' . $response_body['message'], 'error');
-                        $order->update_meta_data('_is_dropi_order', __('Dropi sync error: ' . $response_body['message'], 'dropi'));
-                        $logger->error(wc_print_r('Error creating dropi order ' . $order->get_id() . " " . $response_body['message'], true), array('source' => 'dropi-orders'));
-                        $logger->error(wc_print_r((array) $order, true), array('source' => 'dropi-orders'));
-                        $logger->error(wc_print_r($response_body, true), array('source' => 'dropi-orders'));
-                        $logger->error(wc_print_r($response_body['message'], true), array('source' => 'dropi-orders'));
-                        $logger->error(wc_print_r($response_body['file'], true), array('source' => 'dropi-orders'));
-                        $logger->error(wc_print_r($response_body['line'], true), array('source' => 'dropi-orders'));;
-                    } else {
-
-                        $order->update_meta_data('_is_dropi_order', 'Yes');
-                        if (isset($response_body['objects'])) {
-
-
-                            $order_dropi = $response_body['objects'];
-                            if (isset($order_dropi->id)) {
-
-
-                                $order->update_meta_data('_dropi_order_id', $order_dropi->id);
+                        $is_duplicate_order = stripos($message . ' ' . $error_detail, 'ya fue enviada') !== false;
+                        if ($is_duplicate_order && !empty($existing_dropi_order_ids)) {
+                            $mapped_dropi_order_ids = array_values(array_filter($existing_group_map));
+                            foreach ($existing_dropi_order_ids as $existing_id) {
+                                if (
+                                    !in_array($existing_id, $consumed_existing_dropi_order_ids, true) &&
+                                    !in_array($existing_id, $mapped_dropi_order_ids, true)
+                                ) {
+                                    $existing_group_map[$supplier_id] = $existing_id;
+                                    $created_dropi_orders[] = $existing_id;
+                                    $consumed_existing_dropi_order_ids[] = $existing_id;
+                                    continue 2;
+                                }
                             }
                         }
 
-                        $result = true;
-                        $logger->info(wc_print_r(__('Dropi order created ', 'wc-dropi-integration') . " " . $order->get_id(), true), array('source' => 'dropi-orders'));
+                        $group_errors[] = $message;
+                        $logger->error(wc_print_r('Error creating dropi order ' . $order->get_id() . " " . $message, true), array('source' => 'dropi-orders'));
+                        $logger->error(wc_print_r((array) $order, true), array('source' => 'dropi-orders'));
+                        $logger->error(wc_print_r($response_body, true), array('source' => 'dropi-orders'));
+                        if (isset($response_body['file'])) {
+                            $logger->error(wc_print_r($response_body['file'], true), array('source' => 'dropi-orders'));
+                        }
+                        if (isset($response_body['line'])) {
+                            $logger->error(wc_print_r($response_body['line'], true), array('source' => 'dropi-orders'));
+                        }
+                        continue;
                     }
+
+                    $created_dropi_order_id = $this->extractDropiOrderId($response_body);
+                    if (!empty($created_dropi_order_id)) {
+                        $created_dropi_orders[] = $created_dropi_order_id;
+                        $existing_group_map[$supplier_id] = $created_dropi_order_id;
+                        $consumed_existing_dropi_order_ids[] = $created_dropi_order_id;
+                    }
+                }
+
+                if (!empty($existing_group_map)) {
+                    $order->update_meta_data('_dropi_order_group_map', wp_json_encode($existing_group_map));
+                }
+
+                $all_dropi_order_ids = array_unique(array_filter(array_merge($existing_dropi_order_ids, $created_dropi_orders)));
+
+                if (!empty($group_errors)) {
+                    $error_message = implode(' | ', array_filter($group_errors));
+                    $result = __('Error creating order, ' . $error_message);
+                    $order->update_meta_data('_is_dropi_order', __('Dropi sync error: ' . $error_message, 'dropi'));
+
+                    if (!empty($all_dropi_order_ids)) {
+                        $order->update_meta_data('_dropi_order_id', implode(',', $all_dropi_order_ids));
+                    }
+                } else {
+                    $order->update_meta_data('_is_dropi_order', 'Yes');
+                    if (!empty($all_dropi_order_ids)) {
+                        $order->update_meta_data('_dropi_order_id', implode(',', $all_dropi_order_ids));
+                    }
+
+                    $result = true;
+                    $logger->info(wc_print_r(__('Dropi order created ', 'wc-dropi-integration') . " " . $order->get_id(), true), array('source' => 'dropi-orders'));
                 }
             } else {
                 $order->update_meta_data('_is_dropi_order', __('This order do not have dropi products', 'wc-dropi-integration'));

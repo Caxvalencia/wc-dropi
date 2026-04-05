@@ -6,7 +6,7 @@
 
 Plugin de WordPress para importar productos desde Dropi hacia WooCommerce y enviar pedidos de WooCommerce a Dropi.
 
-Versión actual: `4.7.3`
+Versión actual: `4.7.4`
 
 Repositorio: `https://github.com/Caxvalencia/wc-dropi`
 
