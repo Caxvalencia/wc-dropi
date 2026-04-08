@@ -325,6 +325,434 @@ class JPIODFW_ProductsModel
         return null;
     }
 
+    private function get_variant_by_dropi_source_sku($product_id, $source_sku)
+    {
+        $source_sku = trim((string) $source_sku);
+
+        if ($source_sku === '') {
+            return null;
+        }
+
+        $variation_ids = get_posts(
+            array(
+                'post_type' => 'product_variation',
+                'post_parent' => absint($product_id),
+                'numberposts' => -1,
+                'fields' => 'ids',
+                'post_status' => array('publish', 'private', 'draft'),
+                'meta_query' => array(
+                    array(
+                        'key' => '_dropi_variation_source_sku',
+                        'value' => $source_sku,
+                        'compare' => '=',
+                    ),
+                ),
+            )
+        );
+
+        if (empty($variation_ids)) {
+            return null;
+        }
+
+        return absint($variation_ids[0]);
+    }
+
+    private function getWooManagedStockQuantity($product_id)
+    {
+        $product_id = absint($product_id);
+        if ($product_id <= 0) {
+            return 0;
+        }
+
+        $manage_stock = get_post_meta($product_id, '_manage_stock', true);
+        if ($manage_stock !== 'yes') {
+            return 0;
+        }
+
+        $stock_quantity = get_post_meta($product_id, '_stock', true);
+        if ($stock_quantity === '' || $stock_quantity === null) {
+            return 0;
+        }
+
+        return intval(wc_stock_amount($stock_quantity));
+    }
+
+    private function getDropiWarehouseStockTotal($warehouse_items)
+    {
+        if (!is_array($warehouse_items)) {
+            return null;
+        }
+
+        $stock_total = 0;
+        $found_stock = false;
+
+        foreach ($warehouse_items as $warehouse_item) {
+            if (is_object($warehouse_item) && isset($warehouse_item->stock)) {
+                $stock_total += intval($warehouse_item->stock);
+                $found_stock = true;
+            } elseif (is_array($warehouse_item) && isset($warehouse_item['stock'])) {
+                $stock_total += intval($warehouse_item['stock']);
+                $found_stock = true;
+            }
+        }
+
+        if (!$found_stock) {
+            return null;
+        }
+
+        return max(0, $stock_total);
+    }
+
+    private function getDropiVariationStockQuantity($variation)
+    {
+        if (is_array($variation)) {
+            $variation = (object) $variation;
+        }
+
+        if (!is_object($variation)) {
+            return 0;
+        }
+
+        $warehouse_stock = null;
+        if (isset($variation->warehouse_product_variation)) {
+            $warehouse_stock = $this->getDropiWarehouseStockTotal($variation->warehouse_product_variation);
+        }
+
+        if ($warehouse_stock !== null) {
+            return $warehouse_stock;
+        }
+
+        if (isset($variation->stock)) {
+            return max(0, intval($variation->stock));
+        }
+
+        return 0;
+    }
+
+    private function getDropiProductStockQuantity($product)
+    {
+        if (is_array($product)) {
+            $product = (object) $product;
+        }
+
+        if (!is_object($product)) {
+            return 0;
+        }
+
+        $warehouse_stock = null;
+        if (isset($product->warehouse_product)) {
+            $warehouse_stock = $this->getDropiWarehouseStockTotal($product->warehouse_product);
+        }
+
+        if ($warehouse_stock !== null) {
+            return $warehouse_stock;
+        }
+
+        if (isset($product->stock)) {
+            return max(0, intval($product->stock));
+        }
+
+        return 0;
+    }
+
+    private function getDropiVariationDisplayName($dropi_product, $dropi_variation)
+    {
+        $product_name = is_object($dropi_product) && isset($dropi_product->name) ? trim((string) $dropi_product->name) : '';
+        $attribute_labels = array();
+
+        foreach ($this->extractDropiVariationAttributes($dropi_variation) as $attribute_value) {
+            if (!empty($attribute_value['option'])) {
+                $attribute_labels[] = trim((string) $attribute_value['option']);
+            }
+        }
+
+        if (!empty($attribute_labels)) {
+            return trim($product_name . ' - ' . implode(' / ', $attribute_labels));
+        }
+
+        return $product_name;
+    }
+
+    private function normalizeDropiAttributeLabel($label)
+    {
+        $label = trim((string) $label);
+        if ($label === '') {
+            return '';
+        }
+
+        $label = remove_accents($label);
+        $label = strtoupper($label);
+        $label = preg_replace('/\s+/', ' ', $label);
+
+        return trim($label);
+    }
+
+    private function parseCombinedDropiAttributeValue($attribute_name, $attribute_option)
+    {
+        $attribute_name = trim((string) $attribute_name);
+        $attribute_option = trim((string) $attribute_option);
+
+        if ($attribute_name === '' || $attribute_option === '') {
+            return array();
+        }
+
+        $attribute_labels = array_values(array_filter(array_map('trim', explode(',', $attribute_name))));
+        if (count($attribute_labels) <= 1) {
+            return array(
+                array(
+                    'name' => $attribute_name,
+                    'option' => $attribute_option,
+                ),
+            );
+        }
+
+        $normalized_labels = array_map(array($this, 'normalizeDropiAttributeLabel'), $attribute_labels);
+        $size_label_indexes = array();
+        $color_label_indexes = array();
+
+        foreach ($normalized_labels as $index => $normalized_label) {
+            if (in_array($normalized_label, array('TALLA', 'TALLAS', 'SIZE', 'TAMANO', 'TAMAÑO'), true)) {
+                $size_label_indexes[] = $index;
+            }
+
+            if (in_array($normalized_label, array('COLOR', 'COLORES'), true)) {
+                $color_label_indexes[] = $index;
+            }
+        }
+
+        if (count($attribute_labels) === 2 && !empty($size_label_indexes) && !empty($color_label_indexes)) {
+            $working_value = preg_replace('/\s+/', ' ', $attribute_option);
+            $size_value = '';
+
+            if (preg_match('/\b(?:TALLA|TALLAS|SIZE|TAMA(?:N|Ñ)O)\s*([A-Z0-9]+)/iu', $working_value, $matches)) {
+                $size_value = strtoupper(trim($matches[1]));
+                $working_value = trim(preg_replace('/\b(?:TALLA|TALLAS|SIZE|TAMA(?:N|Ñ)O)\s*[A-Z0-9]+\b/iu', '', $working_value, 1));
+            } elseif (preg_match('/\b(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|XXXXXL|2XL|3XL|4XL|5XL|6XL)\b/i', $working_value, $matches)) {
+                $size_value = strtoupper(trim($matches[1]));
+                $working_value = trim(preg_replace('/\b' . preg_quote($matches[1], '/') . '\b/i', '', $working_value, 1));
+            }
+
+            $working_value = trim(preg_replace('/\b(?:COLOR|COLORES)\b[:\-]?\s*/iu', '', $working_value));
+            $color_value = trim($working_value);
+
+            if ($size_value !== '' && $color_value !== '') {
+                $parsed_attributes = array();
+
+                foreach ($attribute_labels as $index => $label) {
+                    if (in_array($index, $size_label_indexes, true)) {
+                        $parsed_attributes[] = array(
+                            'name' => $label,
+                            'option' => $size_value,
+                        );
+                    } elseif (in_array($index, $color_label_indexes, true)) {
+                        $parsed_attributes[] = array(
+                            'name' => $label,
+                            'option' => $color_value,
+                        );
+                    } else {
+                        $parsed_attributes[] = array(
+                            'name' => $label,
+                            'option' => $attribute_option,
+                        );
+                    }
+                }
+
+                return $parsed_attributes;
+            }
+        }
+
+        return array(
+            array(
+                'name' => $attribute_name,
+                'option' => $attribute_option,
+            ),
+        );
+    }
+
+    private function extractDropiVariationAttributes($variation)
+    {
+        if (is_array($variation)) {
+            $variation = (object) $variation;
+        }
+
+        if (!is_object($variation) || empty($variation->attribute_values) || !is_array($variation->attribute_values)) {
+            return array();
+        }
+
+        $attributes = array();
+
+        foreach ($variation->attribute_values as $attribute_value) {
+            $attribute_value = (object) $attribute_value;
+            $attribute_name = '';
+            $attribute_option = isset($attribute_value->value) ? trim((string) $attribute_value->value) : '';
+
+            if (isset($attribute_value->attribute_name) && $attribute_value->attribute_name !== '') {
+                $attribute_name = trim((string) $attribute_value->attribute_name);
+            } elseif (isset($attribute_value->attribute) && is_object($attribute_value->attribute) && isset($attribute_value->attribute->description)) {
+                $attribute_name = trim((string) $attribute_value->attribute->description);
+            }
+
+            if ($attribute_name === '' || $attribute_option === '') {
+                continue;
+            }
+
+            foreach ($this->parseCombinedDropiAttributeValue($attribute_name, $attribute_option) as $parsed_attribute) {
+                if (empty($parsed_attribute['name']) || empty($parsed_attribute['option'])) {
+                    continue;
+                }
+
+                $attributes[] = array(
+                    'name' => trim((string) $parsed_attribute['name']),
+                    'option' => trim((string) $parsed_attribute['option']),
+                );
+            }
+        }
+
+        return $attributes;
+    }
+
+    private function findWooVariationIdForDropiVariation($product_id, $dropi_product, $dropi_variation)
+    {
+        if (is_array($dropi_variation)) {
+            $dropi_variation = (object) $dropi_variation;
+        }
+
+        if (!is_object($dropi_variation)) {
+            return 0;
+        }
+
+        if (isset($dropi_variation->id)) {
+            $variation_id = $this->get_variant_by_dropi_variation_id($product_id, $dropi_variation->id);
+            if (!empty($variation_id)) {
+                return absint($variation_id);
+            }
+        }
+
+        $source_sku = isset($dropi_variation->sku) ? trim((string) $dropi_variation->sku) : '';
+        if ($source_sku !== '') {
+            $variation_id = $this->get_variant_by_dropi_source_sku($product_id, $source_sku);
+            if (!empty($variation_id)) {
+                return absint($variation_id);
+            }
+        }
+
+        $variation_sku = $this->buildVariationSku($dropi_product, $dropi_variation, $product_id);
+        if ($variation_sku !== '') {
+            $variation_id = $this->get_variant_by_sku($product_id, $variation_sku);
+            if (!empty($variation_id)) {
+                return absint($variation_id);
+            }
+        }
+
+        if ($source_sku !== '' && $source_sku !== $variation_sku) {
+            $variation_id = $this->get_variant_by_sku($product_id, $source_sku);
+            if (!empty($variation_id)) {
+                return absint($variation_id);
+            }
+        }
+
+        return 0;
+    }
+
+    public function compareDropiStockWithWoo($product_id)
+    {
+        $product_id = absint($product_id);
+        $dropi_product_id = absint(get_post_meta($product_id, '_dropi_product_id', true));
+        $dropi_token = get_post_meta($product_id, '_dropi_token', true);
+        $wc_product = wc_get_product($product_id);
+
+        if ($product_id <= 0 || !is_object($wc_product)) {
+            return array(
+                'success' => false,
+                'message' => 'Producto WooCommerce inválido.',
+            );
+        }
+
+        if ($dropi_product_id <= 0 || empty($dropi_token)) {
+            return array(
+                'success' => true,
+                'skipped' => true,
+                'rows' => array(),
+                'message' => 'El producto no está sincronizado con Dropi.',
+            );
+        }
+
+        $dropi_product = $this->getProduct($dropi_product_id, $dropi_token);
+        if (!is_object($dropi_product)) {
+            return array(
+                'success' => false,
+                'message' => 'Dropi no devolvió información válida para el producto ' . $dropi_product_id . '.',
+            );
+        }
+
+        $rows = array();
+
+        if (isset($dropi_product->type) && $dropi_product->type === 'VARIABLE' && !empty($dropi_product->variations) && is_array($dropi_product->variations)) {
+            foreach ($dropi_product->variations as $dropi_variation) {
+                if (is_array($dropi_variation)) {
+                    $dropi_variation = (object) $dropi_variation;
+                }
+
+                if (!is_object($dropi_variation)) {
+                    continue;
+                }
+
+                $wc_variation_id = $this->findWooVariationIdForDropiVariation($product_id, $dropi_product, $dropi_variation);
+                $wc_variation = $wc_variation_id > 0 ? wc_get_product($wc_variation_id) : null;
+                $woo_stock = $wc_variation_id > 0 ? $this->getWooManagedStockQuantity($wc_variation_id) : 0;
+                $dropi_stock = $this->getDropiVariationStockQuantity($dropi_variation);
+
+                if ($woo_stock === $dropi_stock) {
+                    continue;
+                }
+
+                $rows[] = array(
+                    'scope' => 'variation',
+                    'sync_product_id' => $product_id,
+                    'wc_product_id' => $product_id,
+                    'wc_variation_id' => $wc_variation_id,
+                    'dropi_product_id' => $dropi_product_id,
+                    'dropi_variation_id' => isset($dropi_variation->id) ? absint($dropi_variation->id) : 0,
+                    'product_name' => $wc_product->get_name(),
+                    'item_name' => is_object($wc_variation) ? $wc_variation->get_name() : $this->getDropiVariationDisplayName($dropi_product, $dropi_variation),
+                    'sku' => $wc_variation_id > 0 ? get_post_meta($wc_variation_id, '_sku', true) : $this->buildVariationSku($dropi_product, $dropi_variation, $product_id),
+                    'woo_stock' => $woo_stock,
+                    'dropi_stock' => $dropi_stock,
+                    'status' => $dropi_stock > $woo_stock ? 'faltante_en_woo' : 'sobrante_en_woo',
+                );
+            }
+        } else {
+            $woo_stock = $this->getWooManagedStockQuantity($product_id);
+            $dropi_stock = $this->getDropiProductStockQuantity($dropi_product);
+
+            if ($woo_stock !== $dropi_stock) {
+                $rows[] = array(
+                    'scope' => 'product',
+                    'sync_product_id' => $product_id,
+                    'wc_product_id' => $product_id,
+                    'wc_variation_id' => 0,
+                    'dropi_product_id' => $dropi_product_id,
+                    'dropi_variation_id' => 0,
+                    'product_name' => $wc_product->get_name(),
+                    'item_name' => $wc_product->get_name(),
+                    'sku' => $wc_product->get_sku(),
+                    'woo_stock' => $woo_stock,
+                    'dropi_stock' => $dropi_stock,
+                    'status' => $dropi_stock > $woo_stock ? 'faltante_en_woo' : 'sobrante_en_woo',
+                );
+            }
+        }
+
+        return array(
+            'success' => true,
+            'rows' => $rows,
+            'product_id' => $product_id,
+            'dropi_product_id' => $dropi_product_id,
+            'product_name' => $wc_product->get_name(),
+            'difference_count' => count($rows),
+        );
+    }
+
     private function buildAttributesFromVariations($variations)
     {
         if (!is_array($variations)) {
@@ -334,26 +762,9 @@ class JPIODFW_ProductsModel
         $attributes_map = array();
 
         foreach ($variations as $variation) {
-            $variation = (object) $variation;
-
-            if (empty($variation->attribute_values) || !is_array($variation->attribute_values)) {
-                continue;
-            }
-
-            foreach ($variation->attribute_values as $attribute_value) {
-                $attribute_value = (object) $attribute_value;
-                $attribute_name = '';
-                $attribute_option = isset($attribute_value->value) ? trim((string) $attribute_value->value) : '';
-
-                if (isset($attribute_value->attribute_name) && $attribute_value->attribute_name !== '') {
-                    $attribute_name = trim((string) $attribute_value->attribute_name);
-                } elseif (isset($attribute_value->attribute) && is_object($attribute_value->attribute) && isset($attribute_value->attribute->description)) {
-                    $attribute_name = trim((string) $attribute_value->attribute->description);
-                }
-
-                if ($attribute_name === '' || $attribute_option === '') {
-                    continue;
-                }
+            foreach ($this->extractDropiVariationAttributes($variation) as $attribute_value) {
+                $attribute_name = $attribute_value['name'];
+                $attribute_option = $attribute_value['option'];
 
                 if (!isset($attributes_map[$attribute_name])) {
                     $attributes_map[$attribute_name] = array();
@@ -642,25 +1053,12 @@ class JPIODFW_ProductsModel
 
                             $attributes = [];
                             $attributes2 = [];
-                            foreach ($variation->attribute_values as $attr) {
-                                $attr = (object)$attr;
-                                $attribute_name = '';
-
-                                if (isset($attr->attribute_name) && $attr->attribute_name !== '') {
-                                    $attribute_name = $attr->attribute_name;
-                                } elseif (isset($attr->attribute) && is_object($attr->attribute) && isset($attr->attribute->description)) {
-                                    $attribute_name = $attr->attribute->description;
-                                }
-
-                                if ($attribute_name === '') {
-                                    continue;
-                                }
-
+                            foreach ($this->extractDropiVariationAttributes($variation) as $attr) {
                                 $attribute = array(
-                                    $attribute_name => $attr->value
+                                    $attr['name'] => $attr['option']
                                 );
                                 $attribute2 = array(
-                                    'id' => 0, 'name' =>  $attribute_name, 'option' => $attr->value
+                                    'id' => 0, 'name' =>  $attr['name'], 'option' => $attr['option']
                                 );
                                 $attributes[] = $attribute;
                                 $attributes2[] = $attribute2;
@@ -790,21 +1188,51 @@ class JPIODFW_ProductsModel
                         //update_post_meta($post_id, '_manage_stock', false);
                     } else {
 
-                        $stockForSimple = 0;
+                        $stockForSimple = null;
+                        $warehouseStockForSimple = 0;
+                        $hasWarehouseStock = false;
 
-                        if (isset($product->stock)) {
-
-                            $stockForSimple = $product->stock;
-                        }
-
-                        if (isset($product->warehouse_product)) {
+                        if (isset($product->warehouse_product) && is_array($product->warehouse_product)) {
                             foreach ($product->warehouse_product as $value) {
-                                $stockForSimple = $value->stock + $stockForSimple;
+                                if (is_object($value) && isset($value->stock)) {
+                                    $warehouseStockForSimple += intval($value->stock);
+                                    $hasWarehouseStock = true;
+                                } elseif (is_array($value) && isset($value['stock'])) {
+                                    $warehouseStockForSimple += intval($value['stock']);
+                                    $hasWarehouseStock = true;
+                                }
                             }
                         }
 
+                        if ($hasWarehouseStock) {
+                            $stockForSimple = $warehouseStockForSimple;
+                        } elseif (isset($product->stock)) {
+                            $stockForSimple = intval($product->stock);
+                        }
+
+                        if ($stockForSimple === null) {
+                            $stockForSimple = 0;
+                        }
+
+                        $simple_stock_status = intval($stockForSimple) > 0 ? 'instock' : 'outofstock';
+
                         update_post_meta($post_id, '_stock', $stockForSimple);
-                        update_post_meta($post_id, '_manage_stock', true);
+                        update_post_meta($post_id, '_manage_stock', 'yes');
+                        update_post_meta($post_id, '_stock_status', $simple_stock_status);
+
+                        if (function_exists('wc_update_product_stock_status')) {
+                            wc_update_product_stock_status($post_id, $simple_stock_status);
+                        }
+
+                        $simple_product = wc_get_product($post_id);
+                        if (is_object($simple_product)) {
+                            $simple_product->set_manage_stock(true);
+                            $simple_product->set_stock_quantity($stockForSimple);
+                            $simple_product->set_stock_status($simple_stock_status);
+                            $simple_product->save();
+                        }
+
+                        $this->syncProductLookupStockData(array($post_id));
                     }
                 }
 
@@ -896,7 +1324,14 @@ class JPIODFW_ProductsModel
                 array('%d')
             );
 
-            if ($updated === false || $updated === 0) {
+            $lookup_row_exists = (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->wc_product_meta_lookup} WHERE product_id = %d",
+                    $product_id
+                )
+            );
+
+            if ($updated === false || ($updated === 0 && $lookup_row_exists === 0)) {
                 $wpdb->insert(
                     $wpdb->wc_product_meta_lookup,
                     array(
@@ -1066,19 +1501,21 @@ class JPIODFW_ProductsModel
              * ahora busco los atributos que mande por parametro y se los asigno a la variable
              * pero lo hago solo si es create true, para no sobrescriir los valores de los atributos, y le sirva a cristian trujillo
              */
+            $variation_attributes = array();
             foreach ($variation_data['attributes2'] as $attr) {
 
                 $attr = (object)$attr;
 
-                if (!empty($attr->name) && $attr->name != '' && $create === true) {
-                    $default_attributes[strtolower($attr->name)] =  strtolower($attr->option);
-                    update_post_meta($variation_id, 'attribute_' . strtolower($attr->name), $attr->option);
+                if (!empty($attr->name) && $attr->name != '') {
+                    $attribute_key = sanitize_title($attr->name);
+                    $default_attributes[$attribute_key] = $attr->option;
+                    $variation_attributes[$attribute_key] = $attr->option;
+                    update_post_meta($variation_id, 'attribute_' . $attribute_key, $attr->option);
                 }
             }
 
-            //seteo los atributos a la variacion solo si es create
-            if ($create === true) {
-                $variation->set_default_attributes($default_attributes);
+            if (!empty($variation_attributes)) {
+                $variation->set_attributes($variation_attributes);
             }
 
 
@@ -1365,11 +1802,11 @@ class JPIODFW_ProductsModel
             return 0;
         }
 
-        $image_name = $this->getDropiImageFilename($img, $image_url);
+        $image_name = $this->getDropiImageFilename($img, $image_url, $post_id);
         $existing_attachment_id = $this->findExistingDropiAttachment($img, $image_url, $image_name);
 
         if (!empty($existing_attachment_id)) {
-            $this->persistDropiAttachmentMeta($existing_attachment_id, $img, $image_url, $image_name);
+            $this->persistDropiAttachmentMeta($existing_attachment_id, $post_id, $img, $image_url, $image_name);
             return $existing_attachment_id;
         }
 
@@ -1402,7 +1839,7 @@ class JPIODFW_ProductsModel
             return 0;
         }
 
-        $this->persistDropiAttachmentMeta($attach_id, $img, $image_url, $image_name);
+        $this->persistDropiAttachmentMeta($attach_id, $post_id, $img, $image_url, $image_name);
 
         return intval($attach_id);
     }
@@ -1484,7 +1921,7 @@ class JPIODFW_ProductsModel
         return absint($attachment_id);
     }
 
-    private function persistDropiAttachmentMeta($attachment_id, $img, $image_url, $image_name)
+    private function persistDropiAttachmentMeta($attachment_id, $post_id, $img, $image_url, $image_name)
     {
         if (empty($attachment_id)) {
             return;
@@ -1508,6 +1945,8 @@ class JPIODFW_ProductsModel
         if ($image_name !== '') {
             update_post_meta($attachment_id, '_dropi_image_source_filename', $image_name);
         }
+
+        $this->updateDropiAttachmentSearchData($attachment_id, $post_id, $img, $image_name);
     }
 
     private function getDropiImageUrl($img)
@@ -1531,7 +1970,102 @@ class JPIODFW_ProductsModel
         return '';
     }
 
-    private function getDropiImageFilename($img, $image_url)
+    private function getDropiAttachmentContext($post_id, $img, $image_name = '')
+    {
+        if (is_array($img)) {
+            $img = (object) $img;
+        }
+
+        $post_id = absint($post_id);
+        $base_post_id = $post_id;
+        $base_post = get_post($post_id);
+
+        if (is_object($base_post) && $base_post->post_type === 'product_variation' && !empty($base_post->post_parent)) {
+            $base_post_id = absint($base_post->post_parent);
+        }
+
+        $product_name = $base_post_id > 0 ? get_the_title($base_post_id) : '';
+        if ($product_name === '' && is_object($base_post) && !empty($base_post->post_title)) {
+            $product_name = $base_post->post_title;
+        }
+
+        $dropi_product_id = $base_post_id > 0 ? absint(get_post_meta($base_post_id, '_dropi_product_id', true)) : 0;
+        if ($dropi_product_id <= 0 && is_object($img) && isset($img->product_id)) {
+            $dropi_product_id = absint($img->product_id);
+        }
+
+        $image_source_id = $this->getDropiImageSourceId($img);
+        if ($image_source_id === '' && $image_name !== '') {
+            $image_source_id = sanitize_title(pathinfo($image_name, PATHINFO_FILENAME));
+        }
+
+        $product_slug = sanitize_title($product_name);
+        if ($product_slug === '') {
+            $product_slug = $dropi_product_id > 0 ? 'dropi-product-' . $dropi_product_id : 'dropi-image';
+        }
+
+        $search_slug = $product_slug;
+        if ($dropi_product_id > 0) {
+            $search_slug .= '-dropi-' . $dropi_product_id;
+        }
+        if ($image_source_id !== '') {
+            $search_slug .= '-img-' . sanitize_title($image_source_id);
+        }
+
+        $human_title = $product_name !== '' ? $product_name : ucwords(str_replace('-', ' ', $product_slug));
+        if ($dropi_product_id > 0) {
+            $human_title .= ' - Dropi ' . $dropi_product_id;
+        }
+        if ($image_source_id !== '') {
+            $human_title .= ' - Imagen ' . $image_source_id;
+        }
+
+        $description = 'Imagen sincronizada desde Dropi para ' . ($product_name !== '' ? $product_name : $product_slug) . '.';
+        if ($dropi_product_id > 0) {
+            $description .= ' Dropi product id: ' . $dropi_product_id . '.';
+        }
+        if ($image_source_id !== '') {
+            $description .= ' Dropi image id: ' . $image_source_id . '.';
+        }
+
+        return array(
+            'dropi_product_id' => $dropi_product_id,
+            'title' => $human_title,
+            'slug' => sanitize_title($search_slug),
+            'caption' => sanitize_text_field($search_slug),
+            'description' => sanitize_text_field($description),
+            'alt' => sanitize_text_field($human_title),
+        );
+    }
+
+    private function updateDropiAttachmentSearchData($attachment_id, $post_id, $img, $image_name = '')
+    {
+        if (empty($attachment_id)) {
+            return;
+        }
+
+        $context = $this->getDropiAttachmentContext($post_id, $img, $image_name);
+
+        $attachment_update = array(
+            'ID' => absint($attachment_id),
+            'post_parent' => absint($post_id),
+            'post_title' => $context['title'],
+            'post_name' => $context['slug'],
+            'post_excerpt' => $context['caption'],
+            'post_content' => $context['description'],
+        );
+
+        wp_update_post($attachment_update);
+
+        update_post_meta($attachment_id, '_wp_attachment_image_alt', $context['alt']);
+        update_post_meta($attachment_id, '_dropi_attachment_search_slug', $context['slug']);
+
+        if (!empty($context['dropi_product_id'])) {
+            update_post_meta($attachment_id, '_dropi_attachment_dropi_product_id', $context['dropi_product_id']);
+        }
+    }
+
+    private function getDropiImageFilename($img, $image_url, $post_id = 0)
     {
         if (is_array($img)) {
             $img = (object)$img;
@@ -1544,9 +2078,10 @@ class JPIODFW_ProductsModel
             $extension = 'jpg';
         }
 
-        $image_id = isset($img->id) ? $img->id : uniqid('dropi_', true);
+        $context = $this->getDropiAttachmentContext($post_id, $img);
+        $base_name = !empty($context['slug']) ? $context['slug'] : (isset($img->id) ? $img->id : uniqid('dropi_', true));
 
-        return sanitize_file_name($image_id . '.' . strtolower($extension));
+        return sanitize_file_name($base_name . '.' . strtolower($extension));
     }
 
     private function getDropiImageSourceId($img)

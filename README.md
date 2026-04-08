@@ -3,10 +3,12 @@
 > Disclaimer
 >
 > Este repositorio es un fork/adaptación para uso personal. El plugin original no es de mi autoría y los cambios documentados aquí fueron realizados únicamente para cubrir mis necesidades operativas y de desarrollo.
+>
+> La mayoría de los cambios recientes en este fork fueron realizados con asistencia de IA, bajo supervisión y validación manual sobre el código y el comportamiento del plugin.
 
 Plugin de WordPress para importar productos desde Dropi hacia WooCommerce y enviar pedidos de WooCommerce a Dropi.
 
-Versión actual: `4.7.4`
+Versión actual: `4.7.5`
 
 Repositorio: `https://github.com/Caxvalencia/wc-dropi`
 

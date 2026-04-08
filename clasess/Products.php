@@ -93,6 +93,18 @@ class JPIODFW_Products
         $current_post_type = isset($_GET['post_type']) ? sanitize_text_field(wp_unslash($_GET['post_type'])) : '';
         if ($pagenow === 'edit.php' && $current_post_type === 'product') {
             wp_enqueue_script('dropi-woo-resync-confirm', plugin_dir_url(__DIR__) . 'js/woocommerce-resync-confirm.js', array('jquery', 'dropi-sweetalert2'), date('YmdHis'), true);
+            wp_enqueue_script('dropi-woo-stock-validator', plugin_dir_url(__DIR__) . 'js/woocommerce-dropi-stock-validator.js', array('jquery', 'dropi-sweetalert2'), date('YmdHis'), true);
+            wp_localize_script(
+                'dropi-woo-stock-validator',
+                'JPIODFW_dropi_stock_validator',
+                array(
+                    'ajax_url' => admin_url('admin-ajax.php'),
+                    'nonce' => wp_create_nonce('dropi_validate_stock'),
+                    'validate_action' => 'dropi_validate_product_stock',
+                    'sync_action' => 'dropi_sync_product_stock',
+                    'request_delay' => 800,
+                )
+            );
         }
 
 
@@ -115,6 +127,131 @@ class JPIODFW_Products
         $dependencies = array(); //add any depencdencies in array
         $version = false; //or use a version int or string
         wp_enqueue_script('dropi-bootstrap', $path, $dependencies, $version);
+    }
+
+    private function get_dropi_sync_context($product_id)
+    {
+        $product_id = absint($product_id);
+        $dropi_product_id = absint(get_post_meta($product_id, '_dropi_product_id', true));
+        $dropi_token = get_post_meta($product_id, '_dropi_token', true);
+
+        if ($dropi_product_id <= 0 || empty($dropi_token)) {
+            return array(
+                'success' => false,
+                'message' => 'El producto no tiene datos de sincronización de Dropi.',
+            );
+        }
+
+        $store = array();
+        $all_tokens = $this->TokenModel->getTokens();
+        foreach ($all_tokens as $token_item) {
+            if (isset($token_item->token) && $token_item->token === $dropi_token) {
+                $store = array($token_item);
+                break;
+            }
+        }
+
+        if (empty($store) || !isset($store[0]->token)) {
+            return array(
+                'success' => false,
+                'message' => 'No se encontró el token de la tienda para re-sincronizar.',
+            );
+        }
+
+        $dropi_product = $this->ProducstInstance->getProduct($dropi_product_id, $store[0]->token);
+        if (!is_object($dropi_product)) {
+            return array(
+                'success' => false,
+                'message' => 'Dropi no devolvió información válida para este producto.',
+            );
+        }
+
+        $variationstoimport = array();
+        $variations = array();
+        $attributes = array();
+
+        if (isset($dropi_product->type) && $dropi_product->type === 'VARIABLE' && !empty($dropi_product->variations)) {
+            $variations = $dropi_product->variations;
+
+            foreach ($dropi_product->variations as $variation) {
+                if (isset($variation->id)) {
+                    $variationstoimport[] = $variation->id;
+                }
+            }
+
+            if (isset($dropi_product->attributes) && is_array($dropi_product->attributes)) {
+                $attributes = $dropi_product->attributes;
+            }
+        }
+
+        return array(
+            'success' => true,
+            'product_id' => $product_id,
+            'dropi_product_id' => $dropi_product_id,
+            'store' => $store,
+            'dropi_product' => $dropi_product,
+            'variationstoimport' => $variationstoimport,
+            'variations' => $variations,
+            'attributes' => $attributes,
+        );
+    }
+
+    private function sync_dropi_product_with_options($product_id, $options = array())
+    {
+        $context = $this->get_dropi_sync_context($product_id);
+        if (empty($context['success'])) {
+            return $context;
+        }
+
+        $defaults = array(
+            'sob_descripcion' => 'false',
+            'sob_nombre' => 'false',
+            'sob_precio' => 'false',
+            'sob_images' => 'false',
+            'sob_stock' => 'true',
+            'clean_existing_variations' => 'false',
+            'overwrite_variation_images' => 'false',
+        );
+        $options = wp_parse_args($options, $defaults);
+
+        return $this->ProducstInstance->import_product(
+            $context['dropi_product_id'],
+            null,
+            null,
+            null,
+            $options['sob_descripcion'],
+            $options['sob_nombre'],
+            $options['sob_precio'],
+            $options['sob_images'],
+            $context['variationstoimport'],
+            'SYNC',
+            $context['product_id'],
+            $context['variations'],
+            array(),
+            $context['attributes'],
+            $options['sob_stock'],
+            $context['store'],
+            $context['dropi_product'],
+            $options['clean_existing_variations'],
+            $options['overwrite_variation_images']
+        );
+    }
+
+    private function sync_dropi_product_stock_only($product_id)
+    {
+        return $this->sync_dropi_product_with_options($product_id);
+    }
+
+    public function render_dropi_stock_validation_button($which)
+    {
+        global $typenow;
+
+        if ($which !== 'top' || $typenow !== 'product') {
+            return;
+        }
+
+        echo '<button type="button" class="button action" id="dropi-validate-stock-button">' . esc_html__('Validar stock Dropi', 'wc-dropi-integration') . '</button>';
+        echo '<span style="margin-left:8px;color:#50575e;">' . esc_html__('Si no seleccionas productos, se validarán los productos visibles en la página actual.', 'wc-dropi-integration') . '</span>';
     }
 
 
@@ -319,6 +456,56 @@ class JPIODFW_Products
         }
     }
 
+    public function ajax_validate_dropi_product_stock_event()
+    {
+        if (!current_user_can('edit_products')) {
+            wp_send_json(array(
+                'success' => false,
+                'message' => 'No tienes permisos para realizar esta acción.',
+            ), 200);
+        }
+
+        check_ajax_referer('dropi_validate_stock', 'nonce');
+
+        $product_id = isset($_REQUEST['product_id']) ? absint(wp_unslash($_REQUEST['product_id'])) : 0;
+        if ($product_id <= 0) {
+            wp_send_json(array(
+                'success' => false,
+                'message' => 'Producto inválido.',
+            ), 200);
+        }
+
+        wp_send_json($this->ProducstInstance->compareDropiStockWithWoo($product_id), 200);
+    }
+
+    public function ajax_sync_dropi_product_stock_event()
+    {
+        if (!current_user_can('edit_products')) {
+            wp_send_json(array(
+                'success' => false,
+                'message' => 'No tienes permisos para realizar esta acción.',
+            ), 200);
+        }
+
+        check_ajax_referer('dropi_validate_stock', 'nonce');
+
+        $product_id = isset($_REQUEST['product_id']) ? absint(wp_unslash($_REQUEST['product_id'])) : 0;
+        if ($product_id <= 0) {
+            wp_send_json(array(
+                'success' => false,
+                'message' => 'Producto inválido.',
+            ), 200);
+        }
+
+        $result = $this->sync_dropi_product_stock_only($product_id);
+
+        wp_send_json(array(
+            'success' => !empty($result['success']),
+            'message' => isset($result['message']) ? $result['message'] : '',
+            'product_id' => $product_id,
+        ), 200);
+    }
+
     function my_get_woo_products_cb2()
     {
         $productos = [];
@@ -398,102 +585,21 @@ class JPIODFW_Products
 
         check_admin_referer('dropi_resync_product_' . $product_id);
 
-        $dropi_product_id = absint(get_post_meta($product_id, '_dropi_product_id', true));
-        $dropi_token = get_post_meta($product_id, '_dropi_token', true);
-        $overwrite_variation_images = isset($_GET['overwrite_variation_images']) ? wp_unslash($_GET['overwrite_variation_images']) : 'false';
         $redirect_base = ($return_page === 'synced-prods-dropi')
             ? admin_url('admin.php?page=synced-prods-dropi')
             : add_query_arg(array('post_type' => 'product'), admin_url('edit.php'));
 
-        if ($dropi_product_id <= 0 || empty($dropi_token)) {
-            wp_safe_redirect(
-                add_query_arg(
-                    array(
-                        'dropi_resync' => 'error',
-                        'dropi_message' => rawurlencode('El producto no tiene datos de sincronización de Dropi.'),
-                    ),
-                    $redirect_base
-                )
-            );
-            exit;
-        }
-
-        $store = array();
-        $all_tokens = $this->TokenModel->getTokens();
-        foreach ($all_tokens as $token_item) {
-            if (isset($token_item->token) && $token_item->token === $dropi_token) {
-                $store = array($token_item);
-                break;
-            }
-        }
-
-        if (empty($store) || !isset($store[0]->token)) {
-            wp_safe_redirect(
-                add_query_arg(
-                    array(
-                        'dropi_resync' => 'error',
-                        'dropi_message' => rawurlencode('No se encontró el token de la tienda para re-sincronizar.'),
-                    ),
-                    $redirect_base
-                )
-            );
-            exit;
-        }
-
-        $dropi_product = $this->ProducstInstance->getProduct($dropi_product_id, $store[0]->token);
-
-        if (!is_object($dropi_product)) {
-            wp_safe_redirect(
-                add_query_arg(
-                    array(
-                        'dropi_resync' => 'error',
-                        'dropi_message' => rawurlencode('Dropi no devolvió información válida para este producto.'),
-                    ),
-                    $redirect_base
-                )
-            );
-            exit;
-        }
-
-        $variationstoimport = array();
-        $variations = array();
-        $attributes = array();
-
-        if (isset($dropi_product->type) && $dropi_product->type === 'VARIABLE' && !empty($dropi_product->variations)) {
-            $variations = $dropi_product->variations;
-
-            foreach ($dropi_product->variations as $variation) {
-                if (isset($variation->id)) {
-                    $variationstoimport[] = $variation->id;
-                }
-            }
-
-            if (isset($dropi_product->attributes) && is_array($dropi_product->attributes)) {
-                $attributes = $dropi_product->attributes;
-            }
-        }
-
-        $result = $this->ProducstInstance->import_product(
-            $dropi_product_id,
-            null,
-            null,
-            null,
-            'true',
-            'true',
-            'true',
-            'true',
-            $variationstoimport,
-            'SYNC',
-            $product_id,
-            $variations,
-            array(),
-            $attributes,
-            'true',
-            $store,
-            $dropi_product,
-            'false',
-            $overwrite_variation_images
+        $sync_options = array(
+            'sob_descripcion' => isset($_GET['sob_descripcion']) ? sanitize_text_field(wp_unslash($_GET['sob_descripcion'])) : 'false',
+            'sob_nombre' => isset($_GET['sob_nombre']) ? sanitize_text_field(wp_unslash($_GET['sob_nombre'])) : 'false',
+            'sob_precio' => isset($_GET['sob_precio']) ? sanitize_text_field(wp_unslash($_GET['sob_precio'])) : 'false',
+            'sob_images' => isset($_GET['sob_images']) ? sanitize_text_field(wp_unslash($_GET['sob_images'])) : 'false',
+            'sob_stock' => isset($_GET['sob_stock']) ? sanitize_text_field(wp_unslash($_GET['sob_stock'])) : 'true',
+            'clean_existing_variations' => isset($_GET['clean_existing_variations']) ? sanitize_text_field(wp_unslash($_GET['clean_existing_variations'])) : 'false',
+            'overwrite_variation_images' => isset($_GET['overwrite_variation_images']) ? sanitize_text_field(wp_unslash($_GET['overwrite_variation_images'])) : 'false',
         );
+
+        $result = $this->sync_dropi_product_with_options($product_id, $sync_options);
 
         $redirect_args = array(
             'dropi_resync' => !empty($result['success']) ? 'success' : 'error',
@@ -624,6 +730,8 @@ class JPIODFW_Products
         add_action('wp_ajax_import', array(&$this, 'my_import_product_event'));
         add_action('wp_ajax_nopriv_bulk-import-product-ids', array(&$this, 'my_bulk_import_product_ids_event'));
         add_action('wp_ajax_bulk-import-product-ids', array(&$this, 'my_bulk_import_product_ids_event'));
+        add_action('wp_ajax_dropi_validate_product_stock', array(&$this, 'ajax_validate_dropi_product_stock_event'));
+        add_action('wp_ajax_dropi_sync_product_stock', array(&$this, 'ajax_sync_dropi_product_stock_event'));
 
         // AGREGA NUEVA COLUMNA A LA LISTA DE ORDENES
         add_filter('manage_edit-product_columns', array($this, 'custom_shop_product_column'), 20);
@@ -633,5 +741,6 @@ class JPIODFW_Products
         add_filter('post_row_actions', array($this, 'add_dropi_product_row_actions'), 10, 2);
         add_action('admin_action_dropi_resync_product', array($this, 'handle_dropi_resync_product_action'));
         add_action('admin_notices', array($this, 'maybe_show_dropi_resync_notice'));
+        add_action('manage_posts_extra_tablenav', array($this, 'render_dropi_stock_validation_button'), 20, 1);
     }
 }

@@ -2,6 +2,38 @@
 
 Todos los cambios relevantes realizados sobre `wc-dropi-integration`.
 
+## [4.7.5] - 2026-04-08
+
+### Agregado
+- Validador de stock Dropi en la lista de productos de WooCommerce:
+  - Botón `Validar stock Dropi` en el listado de productos.
+  - Comparación del stock de WooCommerce contra el stock actual en Dropi para productos simples y variables.
+  - Modal de revisión con tabla de diferencias detectadas.
+  - Selección manual de cuáles productos sincronizar.
+  - Sincronización secuencial con pausas entre requests para reducir el riesgo de rate limit contra Dropi.
+- Enriquecimiento de attachments de imágenes importadas o reutilizadas:
+  - Nombre de archivo basado en el nombre normalizado del producto y los identificadores Dropi.
+  - Actualización de `title`, `slug`, `caption`, `description` y `alt` del attachment para facilitar su búsqueda en la media library.
+  - Nuevos metas de trazabilidad para el attachment sincronizado desde Dropi.
+- Modal de re-sincronización configurable desde la vista de productos de WooCommerce:
+  - Permite elegir si se sincroniza stock, nombre, descripción, precio, imágenes, limpieza de variaciones y sobrescritura de imágenes de variaciones.
+
+### Corregido
+- Importación y re-sincronización de productos variables con atributos combinados en Dropi:
+  - Se corrigió el parsing de productos como `584375`, donde Dropi envía un único atributo `COLOR,TALLA` con el valor combinado en una sola cadena.
+  - Ahora el importador divide correctamente esos datos en atributos reales de WooCommerce como `COLOR` y `TALLA`.
+  - Las variaciones actualizan correctamente sus metas `attribute_*` incluso cuando ya existían previamente.
+- Re-sincronización desde WooCommerce:
+  - El backend ahora acepta opciones de sincronización equivalentes al flujo manual de Dropify en vez de limitarse a una confirmación fija.
+- Sincronización de `wc_product_meta_lookup`:
+  - Se evitó un intento innecesario de `INSERT` cuando la fila lookup ya existe y el `UPDATE` devuelve `0`, reduciendo warnings por clave duplicada durante sincronizaciones.
+
+### Validado
+- Se validó el parser del producto Dropi `584375`, reconstruyendo correctamente atributos `COLOR` y `TALLA`.
+- Se validó una importación real de prueba de `584375` con 11 variaciones correctas y metas `attribute_color` / `attribute_talla` consistentes.
+- Se validó sintaxis de PHP para `Products.php` y `ProductsModel.php` dentro del contenedor WordPress.
+- Se validó sintaxis del frontend administrativo con `node --check`.
+
 ## [4.7.4] - 2026-04-05
 
 ### Corregido
